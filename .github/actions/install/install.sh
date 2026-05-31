@@ -1,10 +1,11 @@
 #! /bin/bash
-
+set -euo pipefail
 
 # codespell
-pip install codespell
+python -m pip install codespell
+
 # install
-python setup.py build build_ext
-python setup.py install
+MIASM_REQUIRE_JIT=1 python -m pip install --group dev '.[cparser,z3,llvm]'
+
 # extended tests
 git clone https://github.com/cea-sec/miasm-extended-tests
