@@ -31,7 +31,7 @@
 
 from builtins import zip
 from builtins import range
-from typing import Any, Callable, Concatenate, Iterable, Iterator, Literal, ParamSpec, TypeGuard, TYPE_CHECKING, TypeVar, cast
+from typing import Any, Callable, Concatenate, Iterable, Iterator, Literal, ParamSpec, TypeGuard, TYPE_CHECKING, TypeIs, TypeVar, cast, overload
 import warnings
 import itertools
 from builtins import int as int_types
@@ -268,17 +268,17 @@ class ExprWalkBase[T](object):
         return ret
 
 
-class ExprWalk(ExprWalkBase["Expr"]):
+class ExprWalk[R](ExprWalkBase[R]):
     """
     Walk through sub-expressions, call @callback on them.
     If @callback returns a non None value, stop walk and return this value
     Use cache mechanism.
     """
-    def __init__(self, callback: Callable[Concatenate["Expr", P], "Expr|None"]):
+    def __init__(self, callback: Callable[Concatenate["Expr", P], "R|None"]):
         self.cache: set["Expr"] = set()
         self.callback = callback
 
-    def visit(self, expr: "Expr", *args, **kwargs) -> "Expr|None":
+    def visit(self, expr: "Expr", *args, **kwargs) -> "R|None":
         if expr in self.cache:
             return None
         ret = super(ExprWalk, self).visit(expr, *args, **kwargs)
@@ -300,11 +300,11 @@ class ExprGetR(ExprWalkBase["Expr"]):
         self.cache: dict[tuple["Expr", bool, bool], "Expr|None"] = dict()
 
     def get_r_leaves(self, expr: "Expr"):
-        if (expr.is_int() or expr.is_loc()) and self.cst_read:
+        if (is_int(expr) or is_loc(expr)) and self.cst_read:
             self.elements.add(expr)
-        elif expr.is_mem():
+        elif is_mem(expr):
             self.elements.add(expr)
-        elif expr.is_id():
+        elif is_id(expr):
             self.elements.add(expr)
 
     def visit(self, expr: "Expr", *args, **kwargs):
@@ -317,17 +317,17 @@ class ExprGetR(ExprWalkBase["Expr"]):
 
     def visit_inner(self, expr: "Expr", *args, **kwargs):
         self.get_r_leaves(expr)
-        if expr.is_mem() and not self.mem_read:
+        if is_mem(expr) and not self.mem_read:
             # Don't visit memory sons
             return None
 
         if is_assign(expr):
-            if expr.dst.is_mem() and self.mem_read:
+            if is_mem(expr.dst) and self.mem_read:
                 ret = super(ExprGetR, self).visit(expr.dst, *args, **kwargs)
-            if expr.src.is_mem():
+            if is_mem(expr.src):
                 self.elements.add(expr.src)
             self.get_r_leaves(expr.src)
-            if expr.src.is_mem() and not self.mem_read:
+            if is_mem(expr.src) and not self.mem_read:
                 return None
             ret = super(ExprGetR, self).visit(expr.src, *args, **kwargs)
             return ret
@@ -472,31 +472,95 @@ canonize_visitor = ExprVisitorCanonize()
 
 # IR definitions
 
-def is_int(expr: "Expr", value: int|None = None) -> TypeGuard["ExprInt"]:
+@overload
+def is_int(expr: "Expr", value: None = None) -> TypeIs["ExprInt"]: ...
+
+@overload
+def is_int(expr: "Expr", value: int) -> TypeGuard["ExprInt"]: ...
+
+def is_int(expr: "Expr", value: int|None = None) -> bool:
     return expr.is_int(value)
 
-def is_id(expr: "Expr", value: str|None = None) -> TypeGuard["ExprId"]:
+
+@overload
+def is_id(expr: "Expr", value: None = None) -> TypeIs["ExprId"]: ...
+
+@overload
+def is_id(expr: "Expr", value: str) -> TypeGuard["ExprId"]: ...
+
+def is_id(expr: "Expr", value: str|None = None) -> bool:
     return expr.is_id(value)
 
-def is_loc(expr: "Expr", loc_key: LocKey|None=None) -> TypeGuard["ExprLoc"]:
+
+@overload
+def is_loc(expr: "Expr", loc_key: None = None) -> TypeIs["ExprLoc"]: ...
+
+@overload
+def is_loc(expr: "Expr", loc_key: LocKey) -> TypeGuard["ExprLoc"]: ...
+
+def is_loc(expr: "Expr", loc_key: LocKey|None=None) -> bool:
     return expr.is_loc(loc_key)
 
-def is_assign(expr: "Expr") -> TypeGuard["ExprAssign"]:
+
+def is_assign(expr: "Expr") -> TypeIs["ExprAssign"]:
     return expr.is_assign()
 
-def is_cond(expr: "Expr") -> TypeGuard["ExprCond"]:
+
+def is_cond(expr: "Expr") -> TypeIs["ExprCond"]:
     return expr.is_cond()
 
-def is_mem(expr: "Expr") -> TypeGuard["ExprMem"]:
+
+def is_mem(expr: "Expr") -> TypeIs["ExprMem"]:
     return expr.is_mem()
 
-def is_op(expr: "Expr", op: str|None=None) -> TypeGuard["ExprOp"]:
+
+@overload
+def is_op(expr: "Expr", op: None = None) -> TypeIs["ExprOp"]: ...
+
+@overload
+def is_op(expr: "Expr", op: str) -> TypeGuard["ExprOp"]: ...
+
+def is_op(expr: "Expr", op: str|None=None) -> bool:
     return expr.is_op(op)
 
-def is_slice(expr: "Expr", start: int|None=None, stop: int|None=None) -> TypeGuard["ExprSlice"]:
+
+@overload
+def is_slice(expr: "Expr") -> TypeIs["ExprSlice"]: ...
+
+@overload
+def is_slice(
+    expr: "Expr",
+    start: None,
+    stop: None = None,
+) -> TypeIs["ExprSlice"]: ...
+
+@overload
+def is_slice(
+    expr: "Expr",
+    start: int,
+    stop: int | None = None,
+) -> TypeGuard["ExprSlice"]: ...
+
+@overload
+def is_slice(
+    expr: "Expr",
+    start: None,
+    stop: int,
+) -> TypeGuard["ExprSlice"]: ...
+
+# Handles is_slice(expr, stop=3)
+@overload
+def is_slice(
+    expr: "Expr",
+    *,
+    stop: int,
+) -> TypeGuard["ExprSlice"]: ...
+
+def is_slice(expr: "Expr", start: int|None=None, stop: int|None=None) -> bool:
     return expr.is_slice(start, stop)
 
-def is_compose(expr: "Expr") -> TypeGuard["ExprCompose"]:
+
+def is_compose(expr: "Expr") -> TypeIs["ExprCompose"]:
     return expr.is_compose()
 
 class Expr(object):
@@ -657,7 +721,7 @@ class Expr(object):
     def __deepcopy__(self, _):
         return self.copy()
 
-    def replace_expr(self, dct: dict["Expr", "Expr"]) -> "Expr":
+    def replace_expr[D: "Expr", S: "Expr"](self, dct: dict[D, S]) -> "Expr":
         """Find and replace sub expression using dct
         @dct: dictionary associating replaced Expr to its new Expr value
         """
@@ -777,7 +841,29 @@ class Expr(object):
         visitor = ExprVisitorCallbackBottomToTop(callback)
         return visitor.visit(self)
 
-    def get_r(self, mem_read=False, cst_read=False) -> set["Expr"]:
+    @overload
+    def get_r(
+        self,
+        mem_read: bool = False,
+        cst_read: Literal[False] = False,
+    ) -> set["ExprId|ExprMem"]: ...
+
+    @overload
+    def get_r(
+        self,
+        mem_read: bool,
+        cst_read: Literal[True],
+    ) -> set["Expr"]: ...
+
+    @overload
+    def get_r(
+        self,
+        mem_read: bool = False,
+        *,
+        cst_read: Literal[True],
+    ) -> set["Expr"]: ...
+
+    def get_r(self, mem_read: bool=False, cst_read: bool=False) -> set:
         visitor = ExprGetR(mem_read, cst_read)
         visitor.visit(self)
         return visitor.elements

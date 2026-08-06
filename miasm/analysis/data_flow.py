@@ -1,23 +1,27 @@
 """Data flow analysis based on miasm intermediate representation"""
 from builtins import range
 from collections import namedtuple, Counter
+from dataclasses import dataclass
 from pprint import pprint as pp
+from typing import Callable, Collection, Container, Iterable, Iterator, Literal, Self, cast
 from future.utils import viewitems, viewvalues
+from miasm.core.bin_stream import bin_stream
+from miasm.core.locationdb import LocationDB
 from miasm.core.utils import encode_hex
 from miasm.core.graph import DiGraph
-from miasm.ir.ir import AssignBlock, IRBlock
-from miasm.expression.expression import ExprLoc, ExprMem, ExprId, ExprInt,\
-    ExprAssign, ExprOp, ExprWalk, ExprSlice, \
-    is_function_call, ExprVisitorCallbackBottomToTop
+from miasm.ir.ir import IRCFG, AssignBlock, IRBlock, IRBlockBase, IRCFGBase, Lifter
+from miasm.expression.expression import Expr, ExprLoc, ExprMem, ExprId, ExprInt,\
+    ExprAssign, ExprOp, ExprWalk, ExprSlice, LocKey, is_compose, is_cond, \
+    is_function_call, ExprVisitorCallbackBottomToTop, is_id, is_int, is_loc, is_mem, is_op, is_slice
 from miasm.expression.simplifications import expr_simp, expr_simp_explicit
 from miasm.core.interval import interval
 from miasm.expression.expression_helper import possible_values
-from miasm.analysis.ssa import get_phi_sources_parent_block, \
+from miasm.analysis.ssa import SSADiGraph, get_phi_sources_parent_block, \
     irblock_has_phi
 from miasm.ir.symbexec import get_expr_base_offset
 from collections import deque
 
-class ReachingDefinitions(dict):
+class ReachingDefinitions(dict[tuple[LocKey, int], dict[Expr, set[tuple[LocKey, int]]]]):
     """
     Computes for each assignblock the set of reaching definitions.
     Example:
@@ -42,14 +46,14 @@ class ReachingDefinitions(dict):
     { (block, index): { lvalue: set((block, index)) } }
     """
 
-    ircfg = None
+    ircfg: IRCFG
 
-    def __init__(self, ircfg):
+    def __init__(self, ircfg: IRCFG):
         super(ReachingDefinitions, self).__init__()
         self.ircfg = ircfg
         self.compute()
 
-    def get_definitions(self, block_lbl, assignblk_index):
+    def get_definitions(self, block_lbl: LocKey, assignblk_index: int) -> dict[Expr, set[tuple[LocKey, int]]]:
         """Returns the dict { lvalue: set((def_block_lbl, def_index)) }
         associated with self.ircfg.@block.assignblks[@assignblk_index]
         or {} if it is not yet computed
@@ -61,20 +65,20 @@ class ReachingDefinitions(dict):
         modified = True
         while modified:
             modified = False
-            for block in viewvalues(self.ircfg.blocks):
+            for block in self.ircfg.blocks.values():
                 modified |= self.process_block(block)
 
-    def process_block(self, block):
+    def process_block(self, block: IRBlock) -> bool:
         """
         Fetch reach definitions from predecessors and propagate it to
         the assignblk in block @block.
         """
-        predecessor_state = {}
+        predecessor_state: dict[Expr, set[tuple[LocKey, int]]] = {}
         for pred_lbl in self.ircfg.predecessors(block.loc_key):
             if pred_lbl not in self.ircfg.blocks:
                 continue
             pred = self.ircfg.blocks[pred_lbl]
-            for lval, definitions in viewitems(self.get_definitions(pred_lbl, len(pred))):
+            for lval, definitions in self.get_definitions(pred_lbl, len(pred)).items():
                 predecessor_state.setdefault(lval, set()).update(definitions)
 
         modified = self.get((block.loc_key, 0)) != predecessor_state
@@ -86,7 +90,7 @@ class ReachingDefinitions(dict):
             modified |= self.process_assignblock(block, index)
         return modified
 
-    def process_assignblock(self, block, assignblk_index):
+    def process_assignblock(self, block: IRBlock, assignblk_index: int) -> bool:
         """
         Updates the reach definitions with values defined at
         assignblock @assignblk_index in block @block.
@@ -108,10 +112,14 @@ class ReachingDefinitions(dict):
 ATTR_DEP = {"color" : "black",
             "_type" : "data"}
 
-AssignblkNode = namedtuple('AssignblkNode', ['label', 'index', 'var'])
+@dataclass(frozen=True)
+class AssignblkNode:
+    label: LocKey
+    index: int
+    var: Expr
+    
 
-
-class DiGraphDefUse(DiGraph):
+class DiGraphDefUse(DiGraph[AssignblkNode]):
     """Representation of a Use-Definition graph as defined by
     Kennedy, K. (1979). A survey of data flow analysis techniques.
     IBM Thomas J. Watson Research Division.
@@ -132,7 +140,7 @@ class DiGraphDefUse(DiGraph):
     """
 
 
-    def __init__(self, reaching_defs,
+    def __init__(self, reaching_defs: ReachingDefinitions,
                  deref_mem=False, apply_simp=False, *args, **kwargs):
         """Instantiate a DiGraph
         @blocks: IR blocks
@@ -149,7 +157,7 @@ class DiGraphDefUse(DiGraph):
                               deref_mem=deref_mem,
                               apply_simp=apply_simp)
 
-    def edge_attr(self, src, dst):
+    def edge_attr(self, src: AssignblkNode, dst: AssignblkNode) -> dict[str, str]:
         """
         Return a dictionary of attributes for the edge between @src and @dst
         @src: the source node of the edge
@@ -157,53 +165,52 @@ class DiGraphDefUse(DiGraph):
         """
         return self._edge_attr[(src, dst)]
 
-    def _compute_def_use(self, reaching_defs,
+    def _compute_def_use(self, reaching_defs: ReachingDefinitions,
                          deref_mem=False, apply_simp=False):
-        for block in viewvalues(self._blocks):
+        for block in self._blocks.values():
             self._compute_def_use_block(block,
                                         reaching_defs,
                                         deref_mem=deref_mem,
                                         apply_simp=apply_simp)
 
-    def _compute_def_use_block(self, block, reaching_defs, deref_mem=False, apply_simp=False):
+    def _compute_def_use_block(self, block: IRBlock, reaching_defs: ReachingDefinitions, deref_mem=False, apply_simp=False):
         for index, assignblk in enumerate(block):
             assignblk_reaching_defs = reaching_defs.get_definitions(block.loc_key, index)
-            for lval, expr in viewitems(assignblk):
+            for lval, expr in assignblk.items():
                 self.add_node(AssignblkNode(block.loc_key, index, lval))
 
                 expr = expr_simp_explicit(expr) if apply_simp else expr
                 read_vars = expr.get_r(mem_read=deref_mem)
-                if deref_mem and lval.is_mem():
+                if deref_mem and is_mem(lval):
                     read_vars.update(lval.ptr.get_r(mem_read=deref_mem))
                 for read_var in read_vars:
                     for reach in assignblk_reaching_defs.get(read_var, set()):
                         self.add_data_edge(AssignblkNode(reach[0], reach[1], read_var),
                                            AssignblkNode(block.loc_key, index, lval))
 
-    def del_edge(self, src, dst):
+    def del_edge(self, src: AssignblkNode, dst: AssignblkNode):
         super(DiGraphDefUse, self).del_edge(src, dst)
         del self._edge_attr[(src, dst)]
 
-    def add_uniq_labeled_edge(self, src, dst, edge_label):
+    def add_uniq_labeled_edge(self, src: AssignblkNode, dst: AssignblkNode, edge_label: dict[str, str]):
         """Adds the edge (@src, @dst) with label @edge_label.
         if edge (@src, @dst) already exists, the previous label is overridden
         """
         self.add_uniq_edge(src, dst)
         self._edge_attr[(src, dst)] = edge_label
 
-    def add_data_edge(self, src, dst):
+    def add_data_edge(self, src: AssignblkNode, dst: AssignblkNode):
         """Adds an edge representing a data dependency
         and sets the label accordingly"""
         self.add_uniq_labeled_edge(src, dst, ATTR_DEP)
 
-    def node2lines(self, node):
-        lbl, index, reg = node
-        yield self.DotCellDescription(text="%s (%s)" % (lbl, index),
+    def node2lines(self, node: AssignblkNode) -> Iterator[DiGraph.DotCellDescription]:
+        yield self.DotCellDescription(text="%s (%s)" % (node.label, node.index),
                                       attr={'align': 'center',
                                             'colspan': 2,
                                             'bgcolor': 'grey'})
-        src = self._blocks[lbl][index][reg]
-        line = "%s = %s" % (reg, src)
+        src = self._blocks[node.label][node.index][node.var]
+        line = "%s = %s" % (node.var, src)
         yield self.DotCellDescription(text=line, attr={})
         yield self.DotCellDescription(text="", attr={})
 
@@ -213,49 +220,49 @@ class DeadRemoval(object):
     Do dead removal
     """
 
-    def __init__(self, lifter, expr_to_original_expr=None):
+    def __init__(self, lifter: Lifter, expr_to_original_expr: dict[Expr, Expr]|None=None):
         self.lifter = lifter
         if expr_to_original_expr is None:
             expr_to_original_expr = {}
         self.expr_to_original_expr = expr_to_original_expr
 
 
-    def add_expr_to_original_expr(self, expr_to_original_expr):
+    def add_expr_to_original_expr(self, expr_to_original_expr: dict[Expr, Expr]):
         self.expr_to_original_expr.update(expr_to_original_expr)
 
-    def is_unkillable_destination(self, lval, rval):
+    def is_unkillable_destination(self, lval: Expr, rval: Expr) -> bool:
         if (
-                lval.is_mem() or
+                is_mem(lval) or
                 self.lifter.IRDst == lval or
-                lval.is_id("exception_flags") or
+                is_id(lval, "exception_flags") or
                 is_function_call(rval)
         ):
             return True
         return False
 
-    def get_block_useful_destinations(self, block):
+    def get_block_useful_destinations(self, block: IRBlock):
         """
         Force keeping of specific cases
         block: IRBlock instance
         """
-        useful = set()
+        useful = set[AssignblkNode]()
         for index, assignblk in enumerate(block):
             for lval, rval in viewitems(assignblk):
                 if self.is_unkillable_destination(lval, rval):
                     useful.add(AssignblkNode(block.loc_key, index, lval))
         return useful
 
-    def is_tracked_var(self, lval, variable):
+    def is_tracked_var(self, lval: Expr, variable: Expr) -> bool:
         new_lval = self.expr_to_original_expr.get(lval, lval)
         return new_lval == variable
 
-    def find_definitions_from_worklist(self, worklist, ircfg):
+    def find_definitions_from_worklist(self, worklist: set[tuple[Expr, LocKey]], ircfg: IRCFG) -> set[AssignblkNode]:
         """
         Find variables definition in @worklist by browsing the @ircfg
         """
-        locs_done = set()
+        locs_done = set[tuple[Expr, LocKey]]()
 
-        defs = set()
+        defs = set[AssignblkNode]()
 
         while worklist:
             found = False
@@ -271,7 +278,7 @@ class DeadRemoval(object):
                 continue
 
             for index, assignblk in reversed(list(enumerate(block))):
-                for dst, src in viewitems(assignblk):
+                for dst, src in assignblk.items():
                     if self.is_tracked_var(dst, variable):
                         defs.add(AssignblkNode(loc_key, index, dst))
                         found = True
@@ -285,18 +292,18 @@ class DeadRemoval(object):
 
         return defs
 
-    def find_out_regs_definitions_from_block(self, block, ircfg):
+    def find_out_regs_definitions_from_block(self, block: IRBlock, ircfg: IRCFG) -> set[AssignblkNode]:
         """
         Find definitions of out regs starting from @block
         """
         worklist = set()
-        for reg in self.lifter.get_out_regs(block):
+        for reg in self.lifter.get_out_regs(block): # type: ignore
             worklist.add((reg, block.loc_key))
         ret = self.find_definitions_from_worklist(worklist, ircfg)
         return ret
 
 
-    def add_def_for_incomplete_leaf(self, block, ircfg, reaching_defs):
+    def add_def_for_incomplete_leaf(self, block: IRBlock, ircfg: IRCFG, reaching_defs: ReachingDefinitions) -> set[AssignblkNode]:
         """
         Add valid definitions at end of @block plus out regs
         """
@@ -304,7 +311,7 @@ class DeadRemoval(object):
             block.loc_key,
             len(block)
         )
-        worklist = set()
+        worklist = set[tuple[Expr, LocKey]]()
         for lval, definitions in viewitems(valid_definitions):
             for definition in definitions:
                 new_lval = self.expr_to_original_expr.get(lval, lval)
@@ -314,7 +321,7 @@ class DeadRemoval(object):
         useful.update(self.find_out_regs_definitions_from_block(block, ircfg))
         return useful
 
-    def get_useful_assignments(self, ircfg, defuse, reaching_defs):
+    def get_useful_assignments(self, ircfg: IRCFG, defuse: DiGraphDefUse, reaching_defs: ReachingDefinitions) -> Iterator[AssignblkNode]:
         """
         Mark useful statements using previous reach analysis and defuse
 
@@ -326,7 +333,7 @@ class DeadRemoval(object):
 
         useful = set()
 
-        for block_lbl, block in viewitems(ircfg.blocks):
+        for block_lbl, block in ircfg.blocks.items():
             block = ircfg.get_block(block_lbl)
             if block is None:
                 # skip unknown blocks: won't generate dependencies
@@ -360,7 +367,7 @@ class DeadRemoval(object):
             for parent in defuse.reachable_parents(node):
                 yield parent
 
-    def do_dead_removal(self, ircfg):
+    def do_dead_removal(self, ircfg: IRCFG) -> bool:
         """
         Remove useless assignments.
 
@@ -378,7 +385,7 @@ class DeadRemoval(object):
         defuse = DiGraphDefUse(reaching_defs, deref_mem=True)
         useful = self.get_useful_assignments(ircfg, defuse, reaching_defs)
         useful = set(useful)
-        for block in list(viewvalues(ircfg.blocks)):
+        for block in list(ircfg.blocks.values()):
             irs = []
             for idx, assignblk in enumerate(block):
                 new_assignblk = dict(assignblk)
@@ -390,12 +397,12 @@ class DeadRemoval(object):
             ircfg.blocks[block.loc_key] = IRBlock(block.loc_db, block.loc_key, irs)
         return modified
 
-    def __call__(self, ircfg):
+    def __call__(self, ircfg: IRCFG) -> bool:
         ret = self.do_dead_removal(ircfg)
         return ret
 
 
-def _test_merge_next_block(ircfg, loc_key):
+def _test_merge_next_block(ircfg: IRCFG, loc_key: LocKey) -> LocKey|None:
     """
     Test if the irblock at @loc_key can be merge with its son
     @ircfg: IRCFG instance
@@ -416,7 +423,7 @@ def _test_merge_next_block(ircfg, loc_key):
     return son
 
 
-def _do_merge_blocks(ircfg, loc_key, son_loc_key):
+def _do_merge_blocks(ircfg: IRCFG, loc_key: LocKey, son_loc_key: LocKey):
     """
     Merge two irblocks at @loc_key and @son_loc_key
 
@@ -425,12 +432,12 @@ def _do_merge_blocks(ircfg, loc_key, son_loc_key):
     @loc_key: LocKey instance of the son IRBlock
     """
 
-    assignblks = []
+    assignblks: list[AssignBlock] = []
     for assignblk in ircfg.blocks[loc_key]:
         if ircfg.IRDst not in assignblk:
             assignblks.append(assignblk)
             continue
-        affs = {}
+        affs: dict[Expr, Expr] = {}
         for dst, src in viewitems(assignblk):
             if dst != ircfg.IRDst:
                 affs[dst] = src
@@ -450,7 +457,7 @@ def _do_merge_blocks(ircfg, loc_key, son_loc_key):
     ircfg.blocks[loc_key] = new_block
 
 
-def _test_jmp_only(ircfg, loc_key, heads):
+def _test_jmp_only(ircfg: IRCFG, loc_key: LocKey, heads: list[LocKey]) -> LocKey|None:
     """
     If irblock at @loc_key sets only IRDst to an ExprLoc, return the
     corresponding loc_key target.
@@ -468,7 +475,7 @@ def _test_jmp_only(ircfg, loc_key, heads):
     irblock = ircfg.blocks[loc_key]
     if len(irblock.assignblks) != 1:
         return None
-    items = list(viewitems(dict(irblock.assignblks[0])))
+    items = list(dict(irblock.assignblks[0]).items())
     if len(items) != 1:
         return None
     if len(ircfg.successors(loc_key)) != 1:
@@ -476,7 +483,7 @@ def _test_jmp_only(ircfg, loc_key, heads):
     # Don't create predecessors on heads
     dst, src = items[0]
     assert dst.is_id("IRDst")
-    if not src.is_loc():
+    if not is_loc(src):
         return None
     dst = src.loc_key
     if loc_key in heads:
@@ -487,7 +494,7 @@ def _test_jmp_only(ircfg, loc_key, heads):
     return dst
 
 
-def _relink_block_node(ircfg, loc_key, son_loc_key, replace_dct):
+def _relink_block_node(ircfg: IRCFG, loc_key: LocKey, son_loc_key: LocKey, replace_dct: dict[ExprLoc, ExprLoc]):
     """
     Link loc_key's parents to parents directly to son_loc_key
     """
@@ -509,7 +516,7 @@ def _relink_block_node(ircfg, loc_key, son_loc_key, replace_dct):
         ircfg.del_node(loc_key)
 
 
-def _remove_to_son(ircfg, loc_key, son_loc_key):
+def _remove_to_son(ircfg: IRCFG, loc_key: LocKey, son_loc_key: LocKey) -> bool:
     """
     Merge irblocks; The final block has the @son_loc_key loc_key
     Update references
@@ -542,7 +549,7 @@ def _remove_to_son(ircfg, loc_key, son_loc_key):
     return True
 
 
-def _remove_to_parent(ircfg, loc_key, son_loc_key):
+def _remove_to_parent(ircfg: IRCFG, loc_key: LocKey, son_loc_key: LocKey) -> bool:
     """
     Merge irblocks; The final block has the @loc_key loc_key
     Update references
@@ -583,7 +590,7 @@ def _remove_to_parent(ircfg, loc_key, son_loc_key):
     return True
 
 
-def merge_blocks(ircfg, heads):
+def merge_blocks(ircfg: IRCFG, heads: list[LocKey]) -> bool:
     """
     This function modifies @ircfg to apply the following transformations:
     - group an irblock with its son if the irblock has one and only one son and
@@ -640,7 +647,7 @@ def merge_blocks(ircfg, heads):
     return modified
 
 
-def remove_empty_assignblks(ircfg):
+def remove_empty_assignblks(ircfg: IRCFG) -> bool:
     """
     Remove empty assignblks in irblocks of @ircfg
     Return True if at least an irblock has been modified
@@ -649,7 +656,7 @@ def remove_empty_assignblks(ircfg):
     """
     modified = False
     for loc_key, block in list(viewitems(ircfg.blocks)):
-        irs = []
+        irs: list[AssignBlock] = []
         block_modified = False
         for assignblk in block:
             if len(assignblk):
@@ -663,28 +670,30 @@ def remove_empty_assignblks(ircfg):
     return modified
 
 
-class SSADefUse(DiGraph):
+class SSADefUse(DiGraph[AssignblkNode]):
     """
     Generate DefUse information from SSA transformation
     Links are not valid for ExprMem.
     """
 
-    def add_var_def(self, node, src):
+    _links: dict[LocKey, dict[int, dict[Expr, Expr]]]
+
+    def add_var_def(self, node: AssignblkNode, src: Expr):
         index2dst = self._links.setdefault(node.label, {})
         dst2src = index2dst.setdefault(node.index, {})
         dst2src[node.var] = src
 
-    def add_def_node(self, def_nodes, node, src):
-        if node.var.is_id():
+    def add_def_node(self, def_nodes: dict[ExprId, AssignblkNode], node: AssignblkNode, src):
+        if is_id(node.var):
             def_nodes[node.var] = node
 
-    def add_use_node(self, use_nodes, node, src):
-        sources = set()
-        if node.var.is_mem():
+    def add_use_node(self, use_nodes: dict[ExprId, set[AssignblkNode]], node: AssignblkNode, src: Expr):
+        sources = set[ExprId|ExprMem]()
+        if is_mem(node.var):
             sources.update(node.var.ptr.get_r(mem_read=True))
         sources.update(src.get_r(mem_read=True))
         for source in sources:
-            if not source.is_mem():
+            if not is_mem(source):
                 use_nodes.setdefault(source, set()).add(node)
 
     def get_node_target(self, node):
@@ -694,7 +703,7 @@ class SSADefUse(DiGraph):
         self._links[node.label][node.index][node.var] = src
 
     @classmethod
-    def from_ssa(cls, ssa):
+    def from_ssa(cls, ssa: SSADiGraph) -> Self:
         """
         Return a DefUse DiGraph from a SSA graph
         @ssa: SSADiGraph instance
@@ -703,21 +712,21 @@ class SSADefUse(DiGraph):
         graph = cls()
         # First pass
         # Link line to its use and def
-        def_nodes = {}
-        use_nodes = {}
+        def_nodes: dict[ExprId, AssignblkNode] = {}
+        use_nodes: dict[ExprId, set[AssignblkNode]] = {}
         graph._links = {}
         for lbl in ssa.graph.nodes():
             block = ssa.graph.blocks.get(lbl, None)
             if block is None:
                 continue
             for index, assignblk in enumerate(block):
-                for dst, src in viewitems(assignblk):
+                for dst, src in assignblk.items():
                     node = AssignblkNode(lbl, index, dst)
                     graph.add_var_def(node, src)
                     graph.add_def_node(def_nodes, node, src)
                     graph.add_use_node(use_nodes, node, src)
 
-        for dst, node in viewitems(def_nodes):
+        for dst, node in def_nodes.items():
             graph.add_node(node)
             if dst not in use_nodes:
                 continue
@@ -728,53 +737,38 @@ class SSADefUse(DiGraph):
 
 
 
-def expr_has_mem(expr):
+def expr_has_mem(expr: Expr) -> bool:
     """
     Return True if expr contains at least one memory access
     @expr: Expr instance
     """
 
-    def has_mem(self):
+    def has_mem(self) -> bool:
         return self.is_mem()
     visitor = ExprWalk(has_mem)
-    return visitor.visit(expr)
+    res = visitor.visit(expr)
+    assert res is not None
+    return res
 
 
-def stack_to_reg(expr):
-    if expr.is_mem():
-        ptr = expr.arg
-        SP = lifter.sp
-        if ptr == SP:
-            return ExprId("STACK.0", expr.size)
-        elif (ptr.is_op('+') and
-              len(ptr.args) == 2 and
-              ptr.args[0] == SP and
-              ptr.args[1].is_int()):
-            diff = int(ptr.args[1])
-            assert diff % 4 == 0
-            diff = (0 - diff) & 0xFFFFFFFF
-            return ExprId("STACK.%d" % (diff // 4), expr.size)
-    return False
-
-
-def is_stack_access(lifter, expr):
-    if not expr.is_mem():
+def is_stack_access(lifter: Lifter, expr: Expr) -> Literal[False]|ExprMem:
+    if not is_mem(expr):
         return False
     ptr = expr.ptr
     diff = expr_simp(ptr - lifter.sp)
-    if not diff.is_int():
+    if not is_int(diff):
         return False
     return expr
 
 
-def visitor_get_stack_accesses(lifter, expr, stack_vars):
-    if is_stack_access(lifter, expr):
-        stack_vars.add(expr)
+def visitor_get_stack_accesses(lifter: Lifter, expr: Expr, stack_vars: set[ExprMem]):
+    if access := is_stack_access(lifter, expr):
+        stack_vars.add(access)
     return expr
 
 
-def get_stack_accesses(lifter, expr):
-    result = set()
+def get_stack_accesses(lifter: Lifter, expr: Expr) -> set[ExprMem]:
+    result = set[ExprMem]()
     def get_stack(expr_to_test):
         visitor_get_stack_accesses(lifter, expr_to_test, result)
         return None
@@ -790,7 +784,7 @@ def get_interval_length(interval_in):
     return length
 
 
-def check_expr_below_stack(lifter, expr):
+def check_expr_below_stack(lifter: Lifter, expr: ExprMem) -> bool:
     """
     Return False if expr pointer is below original stack pointer
     @lifter: lifter_model_call instance
@@ -798,44 +792,44 @@ def check_expr_below_stack(lifter, expr):
     """
     ptr = expr.ptr
     diff = expr_simp(ptr - lifter.sp)
-    if not diff.is_int():
+    if not is_int(diff):
         return True
-    if int(diff) == 0 or int(expr_simp(diff.msb())) == 0:
+    if int(diff) == 0 or int(expr_simp(diff.msb())) == 0: # type: ignore
         return False
     return True
 
 
-def retrieve_stack_accesses(lifter, ircfg):
+def retrieve_stack_accesses(lifter: Lifter, ircfg: IRCFG) -> dict[Expr, tuple[int, str]]:
     """
     Walk the ssa graph and find stack based variables.
     Return a dictionary linking stack base address to its size/name
     @lifter: lifter_model_call instance
     @ircfg: IRCFG instance
     """
-    stack_vars = set()
-    for block in viewvalues(ircfg.blocks):
+    stack_vars = set[ExprMem]()
+    for block in ircfg.blocks.values():
         for assignblk in block:
-            for dst, src in viewitems(assignblk):
+            for dst, src in assignblk.items():
                 stack_vars.update(get_stack_accesses(lifter, dst))
                 stack_vars.update(get_stack_accesses(lifter, src))
     stack_vars = [expr for expr in stack_vars if check_expr_below_stack(lifter, expr)]
 
-    base_to_var = {}
+    base_to_var: dict[Expr, set[ExprMem]] = {}
     for var in stack_vars:
         base_to_var.setdefault(var.ptr, set()).add(var)
 
 
-    base_to_interval = {}
-    for addr, vars in viewitems(base_to_var):
+    base_to_interval: dict[Expr, interval] = {}
+    for addr, vars in base_to_var.items():
         var_interval = interval()
         for var in vars:
             offset = expr_simp(addr - lifter.sp)
-            if not offset.is_int():
+            if not is_int(offset):
                 # skip non linear stack offset
                 continue
 
             start = int(offset)
-            stop = int(expr_simp(offset + ExprInt(var.size // 8, offset.size)))
+            stop = int(expr_simp(offset + ExprInt(var.size // 8, offset.size))) # type: ignore
             mem = interval([(start, stop-1)])
             var_interval += mem
         base_to_interval[addr] = var_interval
@@ -848,21 +842,21 @@ def retrieve_stack_accesses(lifter, ircfg):
         assert (tmp & mem).empty
         tmp += mem
 
-    base_to_info = {}
-    for addr, vars in viewitems(base_to_var):
+    base_to_info: dict[Expr, tuple[int, str]] = {}
+    for addr, vars in base_to_var.items():
         name = "var_%d" % (len(base_to_info))
         size = max([var.size for var in vars])
         base_to_info[addr] = size, name
     return base_to_info
 
 
-def fix_stack_vars(expr, base_to_info):
+def fix_stack_vars(expr: Expr, base_to_info: dict[Expr, tuple[int, str]]) -> Expr:
     """
     Replace local stack accesses in expr using information in @base_to_info
     @expr: Expression instance
     @base_to_info: dictionary linking stack base address to its size/name
     """
-    if not expr.is_mem():
+    if not is_mem(expr):
         return expr
     ptr = expr.ptr
     if ptr not in base_to_info:
@@ -875,11 +869,11 @@ def fix_stack_vars(expr, base_to_info):
     return var[:expr.size]
 
 
-def replace_mem_stack_vars(expr, base_to_info):
+def replace_mem_stack_vars(expr: Expr, base_to_info: dict[Expr, tuple[int, str]]) -> Expr:
     return expr.visit(lambda expr:fix_stack_vars(expr, base_to_info))
 
 
-def replace_stack_vars(lifter, ircfg):
+def replace_stack_vars(lifter: Lifter, ircfg: IRCFG) -> bool:
     """
     Try to replace stack based memory accesses by variables.
 
@@ -895,11 +889,11 @@ def replace_stack_vars(lifter, ircfg):
 
     base_to_info = retrieve_stack_accesses(lifter, ircfg)
     modified = False
-    for block in list(viewvalues(ircfg.blocks)):
-        assignblks = []
+    for block in list(ircfg.blocks.values()):
+        assignblks: list[AssignBlock] = []
         for assignblk in block:
-            out = {}
-            for dst, src in viewitems(assignblk):
+            out: dict[Expr, Expr] = {}
+            for dst, src in assignblk.items():
                 new_dst = dst.visit(lambda expr:replace_mem_stack_vars(expr, base_to_info))
                 new_src = src.visit(lambda expr:replace_mem_stack_vars(expr, base_to_info))
                 if new_dst != dst or new_src != src:
@@ -907,15 +901,14 @@ def replace_stack_vars(lifter, ircfg):
 
                 out[new_dst] = new_src
 
-            out = AssignBlock(out, assignblk.instr)
-            assignblks.append(out)
+            assignblks.append(AssignBlock(out, assignblk.instr))
         new_block = IRBlock(block.loc_db, block.loc_key, assignblks)
         ircfg.blocks[block.loc_key] = new_block
     return modified
 
 
-def memlookup_test(expr, bs, is_addr_ro_variable, result):
-    if expr.is_mem() and expr.ptr.is_int():
+def memlookup_test[BS](expr: Expr, bs: BS, is_addr_ro_variable: Callable[[BS, int, int], bool], result: set[ExprMem]) -> bool:
+    if is_mem(expr) and is_int(expr.ptr):
         ptr = int(expr.ptr)
         if is_addr_ro_variable(bs, ptr, expr.size):
             result.add(expr)
@@ -923,20 +916,22 @@ def memlookup_test(expr, bs, is_addr_ro_variable, result):
     return True
 
 
-def memlookup_visit(expr, bs, is_addr_ro_variable):
-    result = set()
-    def retrieve_memlookup(expr_to_test):
+def memlookup_visit[BS](expr: Expr, bs: BS, is_addr_ro_variable: Callable[[BS, int, int], bool]) -> set[ExprMem]:
+    result = set[ExprMem]()
+    def retrieve_memlookup(expr_to_test: Expr) -> None:
         memlookup_test(expr_to_test, bs, is_addr_ro_variable, result)
         return None
     visitor = ExprWalk(retrieve_memlookup)
     visitor.visit(expr)
     return result
 
-def get_memlookup(expr, bs, is_addr_ro_variable):
+def get_memlookup[BS](expr: Expr, bs: BS, is_addr_ro_variable: Callable[[BS, int, int], bool]) -> set[ExprMem]:
     return memlookup_visit(expr, bs, is_addr_ro_variable)
 
 
-def read_mem(bs, expr):
+def read_mem(bs: bin_stream, expr: ExprMem):
+    if not is_int(expr.ptr):
+        return expr
     ptr = int(expr.ptr)
     var_bytes = bs.getbytes(ptr, expr.size // 8)[::-1]
     try:
@@ -946,7 +941,7 @@ def read_mem(bs, expr):
     return ExprInt(value, expr.size)
 
 
-def load_from_int(ircfg, bs, is_addr_ro_variable):
+def load_from_int[BS: bin_stream](ircfg: IRCFG, bs: BS, is_addr_ro_variable: Callable[[BS, int, int], bool]) -> bool:
     """
     Replace memory read based on constant with static value
     @ircfg: IRCFG instance
@@ -955,11 +950,11 @@ def load_from_int(ircfg, bs, is_addr_ro_variable):
     """
 
     modified = False
-    for block in list(viewvalues(ircfg.blocks)):
+    for block in list(ircfg.blocks.values()):
         assignblks = list()
         for assignblk in block:
-            out = {}
-            for dst, src in viewitems(assignblk):
+            out: dict[Expr, Expr] = {}
+            for dst, src in assignblk.items():
                 # Test src
                 mems = get_memlookup(src, bs, is_addr_ro_variable)
                 src_new = src
@@ -972,7 +967,7 @@ def load_from_int(ircfg, bs, is_addr_ro_variable):
                     if src_new != src:
                         modified = True
                 # Test dst pointer if dst is mem
-                if dst.is_mem():
+                if is_mem(dst):
                     ptr = dst.ptr
                     mems = get_memlookup(ptr, bs, is_addr_ro_variable)
                     if mems:
@@ -985,8 +980,7 @@ def load_from_int(ircfg, bs, is_addr_ro_variable):
                             modified = True
                             dst = ExprMem(ptr_new, dst.size)
                 out[dst] = src_new
-            out = AssignBlock(out, assignblk.instr)
-            assignblks.append(out)
+            assignblks.append(AssignBlock(out, assignblk.instr))
         block = IRBlock(block.loc_db, block.loc_key, assignblks)
         ircfg.blocks[block.loc_key] = block
     return modified
@@ -998,8 +992,14 @@ class AssignBlockLivenessInfos(object):
     """
 
     __slots__ = ["gen", "kill", "var_in", "var_out", "live", "assignblk"]
+    gen: set[Expr]
+    kill: set[Expr]
+    var_in: set[Expr]
+    var_out: set[Expr]
+    live: set[Expr]
+    assignblk: AssignBlock
 
-    def __init__(self, assignblk, gen, kill):
+    def __init__(self, assignblk: AssignBlock, gen: set[Expr], kill: set[Expr]):
         self.gen = gen
         self.kill = kill
         self.var_in = set()
@@ -1022,20 +1022,24 @@ class AssignBlockLivenessInfos(object):
         return '\n'.join(out)
 
 
-class IRBlockLivenessInfos(object):
+class IRBlockLivenessInfos(IRBlockBase):
     """
     Description of live in / live out of an AssignBlock
     """
     __slots__ = ["loc_key", "infos", "assignblks"]
+    loc_key: LocKey
+    infos: list[AssignBlockLivenessInfos]
+    assignblks: list[AssignBlock]
 
 
-    def __init__(self, irblock):
+    def __init__(self, irblock: IRBlock):
+        super().__init__()
         self.loc_key = irblock.loc_key
         self.infos = []
         self.assignblks = []
         for assignblk in irblock:
-            gens, kills = set(), set()
-            for dst, src in viewitems(assignblk):
+            gens, kills = set[Expr](), set[Expr]()
+            for dst, src in assignblk.items():
                 expr = ExprAssign(dst, src)
                 read = expr.get_r(mem_read=True)
                 write = expr.get_w()
@@ -1056,13 +1060,19 @@ class IRBlockLivenessInfos(object):
             out.append('')
         return "\n".join(out)
 
+    def __iter__(self) -> Iterator[AssignBlock]:
+        return iter(self.assignblks)
 
-class DiGraphLiveness(DiGraph):
+class DiGraphLiveness(IRCFGBase[IRBlockLivenessInfos]):
     """
     DiGraph representing variable liveness
     """
 
-    def __init__(self, ircfg):
+    ircfg: IRCFG
+    loc_db: LocationDB
+    _blocks: dict[LocKey, IRBlockLivenessInfos]
+
+    def __init__(self, ircfg: IRCFG):
         super(DiGraphLiveness, self).__init__()
         self.ircfg = ircfg
         self.loc_db = ircfg.loc_db
@@ -1081,14 +1091,14 @@ class DiGraphLiveness(DiGraph):
                 self.add_uniq_edge(pred, node)
 
     @property
-    def blocks(self):
+    def blocks(self) -> dict[LocKey, IRBlockLivenessInfos]:
         return self._blocks
 
-    def init_var_info(self):
+    def init_var_info(self, lifter: Lifter):
         """Add ircfg out regs"""
         raise NotImplementedError("Abstract method")
 
-    def node2lines(self, node):
+    def node2lines(self, node: LocKey) -> Iterator[DiGraph.DotCellDescription|list[DiGraph.DotCellDescription]]:
         """
         Output liveness information in dot format
         """
@@ -1133,10 +1143,10 @@ class DiGraphLiveness(DiGraph):
             )
             yield self.DotCellDescription(text="", attr={})
 
-    def back_propagate_compute(self, block):
+    def back_propagate_compute(self, block: IRBlockLivenessInfos) -> bool:
         """
         Compute the liveness information in the @block.
-        @block: AssignBlockLivenessInfos instance
+        @block: IRBlockLivenessInfos instance
         """
         infos = block.infos
         modified = False
@@ -1150,7 +1160,7 @@ class DiGraphLiveness(DiGraph):
                 infos[i - 1].var_out = set(infos[i].var_in)
         return modified
 
-    def back_propagate_to_parent(self, todo, node, parent):
+    def back_propagate_to_parent(self, todo: set[LocKey], node: LocKey, parent: LocKey):
         """
         Back propagate the liveness information from @node to @parent.
         @node: loc_key of the source node
@@ -1164,7 +1174,7 @@ class DiGraphLiveness(DiGraph):
         parent_block.infos[-1].var_out = var_info
         todo.add(parent)
 
-    def compute_liveness(self):
+    def compute_liveness(self) -> bool:
         """
         Compute the liveness information for the digraph.
         """
@@ -1188,32 +1198,32 @@ class DiGraphLivenessIRA(DiGraphLiveness):
     DiGraph representing variable liveness for IRA
     """
 
-    def init_var_info(self, lifter):
+    def init_var_info(self, lifter: Lifter):
         """Add ircfg out regs"""
 
         for node in self.leaves():
             irblock = self.ircfg.blocks.get(node, None)
             if irblock is None:
                 continue
-            var_out = lifter.get_out_regs(irblock)
+            var_out = lifter.get_out_regs(irblock) # type: ignore
             irblock_liveness = self.blocks[node]
             irblock_liveness.infos[-1].var_out = var_out
 
 
-def discard_phi_sources(ircfg, deleted_vars):
+def discard_phi_sources(ircfg: IRCFG, deleted_vars: set[Expr]) -> bool:
     """
     Remove phi sources in @ircfg belonging to @deleted_vars set
     @ircfg: IRCFG instance in ssa form
     @deleted_vars: unused phi sources
     """
-    for block in list(viewvalues(ircfg.blocks)):
+    for block in list(ircfg.blocks.values()):
         if not block.assignblks:
             continue
         assignblk = block[0]
-        todo = {}
+        todo: dict[Expr, Expr] = {}
         modified = False
         for dst, src in viewitems(assignblk):
-            if not src.is_op('Phi'):
+            if not is_op(src, 'Phi'):
                 todo[dst] = src
                 continue
             srcs = set(expr for expr in src.args if expr not in deleted_vars)
@@ -1235,7 +1245,7 @@ def discard_phi_sources(ircfg, deleted_vars):
     return True
 
 
-def get_unreachable_nodes(ircfg, edges_to_del, heads):
+def get_unreachable_nodes(ircfg: IRCFG, edges_to_del: Iterable[tuple[LocKey, LocKey]], heads: Iterable[LocKey]) -> tuple[set[LocKey], set[tuple[LocKey, LocKey]]]:
     """
     Return the unreachable nodes starting from heads and the associated edges to
     be deleted.
@@ -1245,8 +1255,8 @@ def get_unreachable_nodes(ircfg, edges_to_del, heads):
     heads: locations of graph heads
     """
     todo = set(heads)
-    visited_nodes = set()
-    new_edges_to_del = set()
+    visited_nodes = set[LocKey]()
+    new_edges_to_del = set[tuple[LocKey, LocKey]]()
     while todo:
         node = todo.pop()
         if node in visited_nodes:
@@ -1265,7 +1275,7 @@ def get_unreachable_nodes(ircfg, edges_to_del, heads):
     return nodes_to_del, new_edges_to_del
 
 
-def update_phi_with_deleted_edges(ircfg, edges_to_del):
+def update_phi_with_deleted_edges(ircfg: IRCFG, edges_to_del: Iterable[tuple[LocKey, LocKey]]) -> bool:
     """
     Update phi which have a source present in @edges_to_del
     @ssa: IRCFG instance in ssa form
@@ -1273,13 +1283,13 @@ def update_phi_with_deleted_edges(ircfg, edges_to_del):
     """
 
 
-    phi_locs_to_srcs = {}
+    phi_locs_to_srcs: dict[LocKey, set[LocKey]] = {}
     for loc_src, loc_dst in edges_to_del:
         phi_locs_to_srcs.setdefault(loc_dst, set()).add(loc_src)
 
     modified = False
     blocks = dict(ircfg.blocks)
-    for loc_dst, loc_srcs in viewitems(phi_locs_to_srcs):
+    for loc_dst, loc_srcs in phi_locs_to_srcs.items():
         if loc_dst not in ircfg.blocks:
             continue
         block = ircfg.blocks[loc_dst]
@@ -1287,9 +1297,9 @@ def update_phi_with_deleted_edges(ircfg, edges_to_del):
             continue
         assignblks = list(block)
         assignblk = assignblks[0]
-        out = {}
+        out: dict[Expr, Expr] = {}
         for dst, phi_sources in viewitems(assignblk):
-            if not phi_sources.is_op('Phi'):
+            if not is_op(phi_sources, 'Phi'):
                 out[dst] = phi_sources
                 continue
             var_to_parents = get_phi_sources_parent_block(
@@ -1314,34 +1324,36 @@ def update_phi_with_deleted_edges(ircfg, edges_to_del):
         new_irblock = IRBlock(block.loc_db, loc_dst, assignblks)
         blocks[block.loc_key] = new_irblock
 
-    for loc_key, block in viewitems(blocks):
+    for loc_key, block in blocks.items():
         ircfg.blocks[loc_key] = block
     return modified
 
 
-def del_unused_edges(ircfg, heads):
+def del_unused_edges(ircfg: IRCFG, heads: Iterable[LocKey]) -> bool:
     """
     Delete non accessible edges in the @ircfg graph.
     @ircfg: IRCFG instance in ssa form
     @heads: location of the heads of the graph
     """
 
-    deleted_vars = set()
+    deleted_vars = set[Expr]()
     modified = False
-    edges_to_del_1 = set()
+    edges_to_del_1 = set[tuple[LocKey, LocKey]]()
     for node in ircfg.nodes():
         successors = set(ircfg.successors(node))
         block = ircfg.blocks.get(node, None)
         if block is None:
             continue
         dst = block.dst
+        assert dst is not None
         possible_dsts = set(solution.value for solution in possible_values(dst))
-        if not all(dst.is_loc() for dst in possible_dsts):
+        if not all(is_loc(dst) for dst in possible_dsts):
             continue
-        possible_dsts = set(dst.loc_key for dst in possible_dsts)
-        if len(possible_dsts) == len(successors):
+        possible_dsts_locs = cast(set[ExprLoc], possible_dsts)
+        possible_dst_keys = set(dst.loc_key for dst in possible_dsts_locs)
+        if len(possible_dst_keys) == len(successors):
             continue
-        dsts_to_del = successors.difference(possible_dsts)
+        dsts_to_del = successors.difference(possible_dst_keys)
         for dst in dsts_to_del:
             edges_to_del_1.add((node, dst))
 
@@ -1375,25 +1387,26 @@ class DiGraphLivenessSSA(DiGraphLivenessIRA):
     """
     DiGraph representing variable liveness is a SSA graph
     """
-    def __init__(self, ircfg):
+    loc_key_to_phi_parents: dict[LocKey, dict[Expr, set[LocKey]]]
+    def __init__(self, ircfg: IRCFG):
         super(DiGraphLivenessSSA, self).__init__(ircfg)
 
         self.loc_key_to_phi_parents = {}
-        for irblock in viewvalues(self.blocks):
+        for irblock in self.blocks.values():
             if not irblock_has_phi(irblock):
                 continue
-            out = {}
-            for sources in viewvalues(irblock[0]):
-                if not sources.is_op('Phi'):
+            out: dict[Expr, set[LocKey]] = {}
+            for sources in irblock[0].values():
+                if not is_op(sources, 'Phi'):
                     # Some phi sources may have already been resolved to an
                     # expression
                     continue
                 var_to_parents = get_phi_sources_parent_block(self, irblock.loc_key, sources.args)
-                for var, var_parents in viewitems(var_to_parents):
+                for var, var_parents in var_to_parents.items():
                     out.setdefault(var, set()).update(var_parents)
             self.loc_key_to_phi_parents[irblock.loc_key] = out
 
-    def back_propagate_to_parent(self, todo, node, parent):
+    def back_propagate_to_parent(self, todo: set[LocKey], node: LocKey, parent: LocKey):
         if parent not in self.blocks:
             return
         parent_block = self.blocks[parent]
@@ -1405,7 +1418,7 @@ class DiGraphLivenessSSA(DiGraphLivenessIRA):
 
         if irblock_has_phi(irblock):
             # Remove phi special case
-            out = set()
+            out = set[Expr]()
             phi_sources = self.loc_key_to_phi_parents[irblock.loc_key]
             for var in var_info:
                 if var not in phi_sources:
@@ -1419,14 +1432,15 @@ class DiGraphLivenessSSA(DiGraphLivenessIRA):
         todo.add(parent)
 
 
-def get_phi_sources(phi_src, phi_dsts, ids_to_src):
+def get_phi_sources(phi_src: ExprOp, phi_dsts: set[ExprId], ids_to_src: dict[ExprId, ExprOp]) -> bool|ExprOp:
     """
     Return False if the @phi_src has more than one non-phi source
     Else, return its source
     @ids_to_src: Dictionary linking phi source to its definition
     """
-    true_values = set()
+    true_values = set[ExprOp]()
     for src in phi_src.args:
+        assert is_id(src)
         if src in phi_dsts:
             # Source is phi dst => skip
             continue
@@ -1435,7 +1449,7 @@ def get_phi_sources(phi_src, phi_dsts, ids_to_src):
             # Source is phi dst => skip
             continue
         # Check if src is not also a phi
-        if true_src.is_op('Phi'):
+        if is_op(true_src, 'Phi'):
             phi_dsts.add(src)
             true_src = get_phi_sources(true_src, phi_dsts, ids_to_src)
         if true_src is False:
@@ -1460,16 +1474,16 @@ class DelDummyPhi(object):
     the class representative.
     """
 
-    def src_gen_phi_node_srcs(self, equivalence_graph):
+    def src_gen_phi_node_srcs(self, equivalence_graph: DiGraph[Expr]) -> tuple[set[ExprId], ExprId, Expr, DiGraph[Expr]]|None:
         for node in equivalence_graph.nodes():
-            if not node.is_op("Phi"):
+            if not is_op(node, "Phi"):
                 continue
             phi_successors = equivalence_graph.successors(node)
             for head in phi_successors:
                 # Walk from head to find if we have a phi merging node
                 known = set([node])
                 todo = set([head])
-                done = set()
+                done = set[Expr]()
                 while todo:
                     node = todo.pop()
                     if node in done:
@@ -1483,22 +1497,23 @@ class DelDummyPhi(object):
                             break
                     if not is_ok:
                         continue
-                    if node.is_op("Phi"):
+                    if is_op(node, "Phi"):
                         successors = equivalence_graph.successors(node)
                         phi_node = successors.pop()
+                        assert is_id(phi_node)
                         return set([phi_node]), phi_node, head, equivalence_graph
                     done.add(node)
                     for successor in equivalence_graph.successors(node):
                         todo.add(successor)
         return None
 
-    def get_equivalence_class(self, node, ids_to_src):
-        todo = set([node])
-        done = set()
-        defined = set()
-        equivalence = set()
-        src_to_dst = {}
-        equivalence_graph = DiGraph()
+    def get_equivalence_class(self, in_node: ExprId, ids_to_src: dict[ExprId, Expr]) -> tuple[Collection[ExprId], ExprId, Expr, DiGraph[Expr]] | None:
+        todo = set([in_node])
+        done = set[Expr]()
+        defined = set[Expr]()
+        equivalence = set[Expr]()
+        src_to_dst: dict[Expr, ExprId] = {}
+        equivalence_graph = DiGraph[Expr]()
         while todo:
             dst = todo.pop()
             if dst in done:
@@ -1511,17 +1526,17 @@ class DelDummyPhi(object):
                 continue
             src_to_dst[src] = dst
             defined.add(dst)
-            if src.is_id():
+            if is_id(src):
                 equivalence_graph.add_uniq_edge(src, dst)
                 todo.add(src)
-            elif src.is_op('Phi'):
+            elif is_op(src, 'Phi'):
                 equivalence_graph.add_uniq_edge(src, dst)
                 for arg in src.args:
-                    assert arg.is_id()
+                    assert is_id(arg)
                     equivalence_graph.add_uniq_edge(arg, src)
                     todo.add(arg)
             else:
-                if src.is_mem() or (src.is_op() and src.op.startswith("call")):
+                if is_mem(src) or is_function_call(src):
                     if src in equivalence_graph.nodes():
                         return None
                 equivalence_graph.add_uniq_edge(src, dst)
@@ -1536,17 +1551,17 @@ class DelDummyPhi(object):
             if len(successors) == 1:
                 # If successor is an id
                 successor = successors.pop()
-                if successor.is_id():
+                if is_id(successor):
                     nodes = equivalence_graph.nodes()
                     nodes.discard(head)
                     nodes.discard(successor)
-                    nodes = [node for node in nodes if node.is_id()]
+                    nodes = [node for node in nodes if is_id(node)]
                     return nodes, successor, head, equivalence_graph
             else:
                 # Walk from head to find if we have a phi merging node
-                known = set()
+                known = set[Expr]()
                 todo = set([head])
-                done = set()
+                done = set[Expr]()
                 while todo:
                     node = todo.pop()
                     if node in done:
@@ -1559,10 +1574,11 @@ class DelDummyPhi(object):
                             break
                     if not is_ok:
                         continue
-                    if node.is_op("Phi"):
+                    if is_op(node, "Phi"):
                         successors = equivalence_graph.successors(node)
                         assert len(successors) == 1
                         phi_node = successors.pop()
+                        assert is_id(phi_node)
                         return set([phi_node]), phi_node, head, equivalence_graph
                     done.add(node)
                     for successor in equivalence_graph.successors(node):
@@ -1570,13 +1586,13 @@ class DelDummyPhi(object):
 
         return self.src_gen_phi_node_srcs(equivalence_graph)
 
-    def del_dummy_phi(self, ssa, head):
-        ids_to_src = {}
-        def_to_loc = {}
-        for block in viewvalues(ssa.graph.blocks):
-            for index, assignblock in enumerate(block):
-                for dst, src in viewitems(assignblock):
-                    if not dst.is_id():
+    def del_dummy_phi(self, ssa: SSADiGraph, head: LocKey) -> bool:
+        ids_to_src: dict[ExprId, Expr] = {}
+        def_to_loc: dict[ExprId, LocKey] = {}
+        for block in ssa.graph.blocks.values():
+            for assignblock in block:
+                for dst, src in assignblock.items():
+                    if not is_id(dst):
                         continue
                     ids_to_src[dst] = src
                     def_to_loc[dst] = block.loc_key
@@ -1588,8 +1604,8 @@ class DelDummyPhi(object):
             if not irblock_has_phi(block):
                 continue
             assignblk = block[0]
-            for dst, phi_src in viewitems(assignblk):
-                assert phi_src.is_op('Phi')
+            for dst, phi_src in assignblk.items():
+                assert is_op(phi_src, 'Phi') and is_id(dst)
                 result = self.get_equivalence_class(dst, ids_to_src)
                 if result is None:
                     continue
@@ -1597,7 +1613,7 @@ class DelDummyPhi(object):
                 if expr_has_mem(true_value):
                     # Don't propagate ExprMem
                     continue
-                if true_value.is_op() and true_value.op.startswith("call"):
+                if is_function_call(true_value):
                     # Don't propagate call
                     continue
                 # We have an equivalence of nodes
@@ -1608,8 +1624,8 @@ class DelDummyPhi(object):
                     block = ssa.graph.blocks[loc_key]
 
                     assignblk = block[0]
-                    fixed_phis = {}
-                    for old_dst, old_phi_src in viewitems(assignblk):
+                    fixed_phis: dict[Expr, Expr] = {}
+                    for old_dst, old_phi_src in assignblk.items():
                         if old_dst in defined:
                             continue
                         fixed_phis[old_dst] = old_phi_src
@@ -1623,16 +1639,16 @@ class DelDummyPhi(object):
         return modified
 
 
-def replace_expr_from_bottom(expr_orig, dct):
-    def replace(expr):
+def replace_expr_from_bottom[D: Expr, S: Expr](expr_orig: Expr, dct: dict[D, S]) -> Expr:
+    def replace(expr: Expr) -> Expr:
         if expr in dct:
-            return dct[expr]
+            return dct[cast(D, expr)]
         return expr
     visitor = ExprVisitorCallbackBottomToTop(lambda expr:replace(expr))
     return visitor.visit(expr_orig)
 
 
-def is_mem_sub_part(needle, mem):
+def is_mem_sub_part(needle: ExprMem, mem: ExprMem) -> Literal[False]|int:
     """
     If @needle is a sub part of @mem, return the offset of @needle in @mem
     Else, return False
@@ -1661,6 +1677,10 @@ class UnionFind(object):
     The order attributes is used to allow the selection of a representative
     element of an equivalence class
     """
+    index: int
+    __classes: list[set[Expr]]
+    node_to_class: dict[Expr, set[Expr]]
+    order: dict[Expr, int]
 
     def __init__(self):
         self.index = 0
@@ -1668,7 +1688,7 @@ class UnionFind(object):
         self.node_to_class = {}
         self.order = dict()
 
-    def copy(self):
+    def copy(self) -> "UnionFind":
         """
         Return a copy of the object
         """
@@ -1683,33 +1703,33 @@ class UnionFind(object):
         unionfind.order = dict(self.order)
         return unionfind
 
-    def replace_node(self, old_node, new_node):
+    def replace_node(self, old_node: Expr, new_node: Expr):
         """
         Replace the @old_node by the @new_node
         """
         classes = self.get_classes()
 
-        new_classes = []
+        new_classes: list[set[Expr]] = []
         replace_dct = {old_node:new_node}
         for eq_class in classes:
-            new_class = set()
+            new_class = set[Expr]()
             for node in eq_class:
                 new_class.add(replace_expr_from_bottom(node, replace_dct))
             new_classes.append(new_class)
 
-        node_to_class = {}
+        node_to_class: dict[Expr, set[Expr]] = {}
         for class_eq in new_classes:
             for node in class_eq:
                 node_to_class[node] = class_eq
         self.__classes = new_classes
         self.node_to_class = node_to_class
-        new_order = dict()
+        new_order = dict[Expr, int]()
         for node,index in self.order.items():
             new_node = replace_expr_from_bottom(node, replace_dct)
             new_order[new_node] = index
         self.order = new_order
 
-    def get_classes(self):
+    def get_classes(self) -> list[set[Expr]]:
         """
         Return a list of the equivalent classes
         """
@@ -1718,7 +1738,7 @@ class UnionFind(object):
             classes.append(set(class_tmp))
         return classes
 
-    def nodes(self):
+    def nodes(self) -> Iterator[Expr]:
         for known_class in self.__classes:
             for node in known_class:
                 yield node
@@ -1743,7 +1763,7 @@ class UnionFind(object):
         out.append('>')
         return "\n".join(out)
 
-    def add_equivalence(self, node_a, node_b):
+    def add_equivalence(self, node_a: Expr, node_b: Expr):
         """
         Add the new equivalence @node_a == @node_b
         @node_a is equivalent to @node_b, but @node_b is more representative
@@ -1772,7 +1792,7 @@ class UnionFind(object):
         else:
             raise RuntimeError("Two nodes cannot be in two classes")
 
-    def _get_master(self, node):
+    def _get_master(self, node: Expr) -> Expr|None:
         if node not in self.node_to_class:
             return None
         known_class = self.node_to_class[node]
@@ -1782,32 +1802,33 @@ class UnionFind(object):
                 best_node = node
         return best_node
 
-    def get_master(self, node):
+    def get_master(self, node: Expr) -> Expr|None:
         """
         Return the representative element of the equivalence class containing
         @node
         @node: ExprMem or ExprId
         """
-        if not node.is_mem():
+        if not is_mem(node):
             return self._get_master(node)
         if node in self.node_to_class:
             # Full expr mem is known
             return self._get_master(node)
         # Test if mem is sub part of known node
         for expr in self.node_to_class:
-            if not expr.is_mem():
+            if not is_mem(expr):
                 continue
             ret = is_mem_sub_part(node, expr)
             if ret is False:
                 continue
             master = self._get_master(expr)
+            assert master is not None
             master = master[ret * 8 : ret * 8 + node.size]
             return master
 
         return self._get_master(node)
 
 
-    def del_element(self, node):
+    def del_element(self, node: Expr):
         """
         Remove @node for the equivalence classes
         """
@@ -1817,7 +1838,7 @@ class UnionFind(object):
         del(self.node_to_class[node])
         del(self.order[node])
 
-    def del_get_new_master(self, node):
+    def del_get_new_master(self, node: Expr) -> Expr|None:
         """
         Remove @node for the equivalence classes and return it's representative
         equivalent element
@@ -1842,11 +1863,11 @@ class ExprToGraph(ExprWalk):
     """
     Transform an Expression into a tree and add link nodes to an existing tree
     """
-    def __init__(self, graph):
+    def __init__(self, graph: DiGraph[Expr]):
         super(ExprToGraph, self).__init__(self.link_nodes)
         self.graph = graph
 
-    def link_nodes(self, expr, *args, **kwargs):
+    def link_nodes(self, expr: Expr, *args, **kwargs):
         """
         Transform an Expression @expr into a tree and add link nodes to the
         current tree
@@ -1855,18 +1876,18 @@ class ExprToGraph(ExprWalk):
         if expr in self.graph.nodes():
             return None
         self.graph.add_node(expr)
-        if expr.is_mem():
+        if is_mem(expr):
             self.graph.add_uniq_edge(expr, expr.ptr)
-        elif expr.is_slice():
+        elif is_slice(expr):
             self.graph.add_uniq_edge(expr, expr.arg)
-        elif expr.is_cond():
+        elif is_cond(expr):
             self.graph.add_uniq_edge(expr, expr.cond)
             self.graph.add_uniq_edge(expr, expr.src1)
             self.graph.add_uniq_edge(expr, expr.src2)
-        elif expr.is_compose():
+        elif is_compose(expr):
             for arg in expr.args:
                 self.graph.add_uniq_edge(expr, arg)
-        elif expr.is_op():
+        elif is_op(expr):
             for arg in expr.args:
                 self.graph.add_uniq_edge(expr, arg)
         return None
@@ -1882,12 +1903,12 @@ class State(object):
 
     def __init__(self):
         self.equivalence_classes = UnionFind()
-        self.undefined = set()
+        self.undefined = set[Expr]()
 
     def __str__(self):
         return "{0.equivalence_classes}\n{0.undefined}".format(self)
 
-    def copy(self):
+    def copy(self) -> "State":
         state = self.__class__()
         state.equivalence_classes = self.equivalence_classes.copy()
         state.undefined = self.undefined.copy()
@@ -1908,7 +1929,7 @@ class State(object):
         # required Python 2.7.14
         return not self == other
 
-    def may_interfer(self, dsts, src):
+    def may_interfer(self, dsts: Iterable[Expr], src: Expr) -> bool:
         """
         Return True if @src may interfere with expressions in @dsts
         @dsts: Set of Expressions
@@ -1920,7 +1941,7 @@ class State(object):
             for dst in dsts:
                 if dst in src:
                     return True
-                if dst.is_mem() and src.is_mem():
+                if is_mem(dst) and is_mem(src):
                     dst_base, dst_offset = get_expr_base_offset(dst.ptr)
                     src_base, src_offset = get_expr_base_offset(src.ptr)
                     if dst_base != src_base:
@@ -1949,13 +1970,13 @@ class State(object):
                     return True
         return False
 
-    def _get_representative_expr(self, expr):
+    def _get_representative_expr(self, expr: Expr) -> Expr:
         representative = self.equivalence_classes.get_master(expr)
         if representative is None:
             return expr
         return representative
 
-    def get_representative_expr(self, expr):
+    def get_representative_expr(self, expr: Expr) -> Expr:
         """
         Replace each sub expression of @expr by its representative element
         @expr: Expression to analyse
@@ -1963,7 +1984,7 @@ class State(object):
         new_expr = expr.visit(self._get_representative_expr)
         return new_expr
 
-    def propagation_allowed(self, expr):
+    def propagation_allowed(self, expr: Expr) -> bool:
         """
         Return True if @expr can be propagated
         Don't propagate:
@@ -1971,29 +1992,24 @@ class State(object):
         - call_func_ret / call_func_stack operants
         """
 
-        if (
-                expr.is_op('Phi') or
-                (expr.is_op() and expr.op.startswith("call_func"))
-        ):
-            return False
-        return True
+        return not is_op(expr, 'Phi') and not is_function_call(expr)
 
-    def eval_assignblock(self, assignblock):
+    def eval_assignblock(self, assignblock: AssignBlock) -> AssignBlock:
         """
         Evaluate the @assignblock on the current state
         @assignblock: AssignBlock instance
         """
 
         out = dict(assignblock.items())
-        new_out = dict()
+        new_out = dict[Expr, Expr]()
         # Replace sub expression by their equivalence class repesentative
         for dst, src in out.items():
-            if src.is_op('Phi'):
+            if is_op(src, 'Phi'):
                 # Don't replace in phi
                 new_src = src
             else:
                 new_src = self.get_representative_expr(src)
-            if dst.is_mem():
+            if is_mem(dst):
                 new_ptr = self.get_representative_expr(dst.ptr)
                 new_dst = ExprMem(new_ptr, dst.size)
             else:
@@ -2013,10 +2029,10 @@ class State(object):
                 to_del = set([dst])
                 to_replace = {}
             else:
-                to_del = set()
+                to_del = set[Expr]()
                 to_replace = {dst:replacement}
 
-            graph = DiGraph()
+            graph = DiGraph[Expr]()
             # Build en expression graph linking all classes
             has_parents = False
             for node in classes.nodes():
@@ -2030,7 +2046,7 @@ class State(object):
                 continue
 
             todo = graph.leaves()
-            done = set()
+            done = set[Expr]()
 
             while todo:
                 node = todo.pop(0)
@@ -2082,33 +2098,32 @@ class State(object):
         dsts = new_out.keys()
 
         # Remove interfering known classes
-        to_del = set()
         for node in list(classes.nodes()):
             if self.may_interfer(dsts, node):
                 # Interfere with known equivalence class
                 self.equivalence_classes.del_element(node)
-                if node.is_id() or node.is_mem():
+                if is_id(node) or is_mem(node):
                     self.undefined.add(node)
 
 
         # Update equivalence classes
         for dst, src in new_out.items():
             # Delete equivalence class interfering with dst
-            to_del = set()
+            to_del = set[Expr]()
             classes = self.equivalence_classes
             for node in classes.nodes():
                 if dst in node:
                     to_del.add(node)
             for node in to_del:
                 self.equivalence_classes.del_element(node)
-                if node.is_id() or node.is_mem():
+                if is_id(node) or is_mem(node):
                     self.undefined.add(node)
 
             # Don't create equivalence if self interfer
             if self.may_interfer(dsts, src):
                 if dst in self.equivalence_classes.nodes():
                     self.equivalence_classes.del_element(dst)
-                    if dst.is_id() or dst.is_mem():
+                    if is_id(dst) or is_mem(dst):
                         self.undefined.add(dst)
                 continue
 
@@ -2123,7 +2138,7 @@ class State(object):
         return new_assignblk
 
 
-    def merge(self, other):
+    def merge(self, other: "State") -> "State":
         """
         Merge the current state with @other
         Merge rules:
@@ -2134,21 +2149,21 @@ class State(object):
         classes1 = self.equivalence_classes
         classes2 = other.equivalence_classes
 
-        undefined = set(node for node in self.undefined if node.is_id() or node.is_mem())
-        undefined.update(set(node for node in other.undefined if node.is_id() or node.is_mem()))
+        undefined = set(node for node in self.undefined if is_id(node) or is_mem(node))
+        undefined.update(set(node for node in other.undefined if is_id(node) or is_mem(node)))
         # Should we compute interference between srcs and undefined ?
         # Nop => should already interfere in other state
         components1 = classes1.get_classes()
         components2 = classes2.get_classes()
 
-        node_to_component2 = {}
+        node_to_component2: dict[Expr, set[Expr]] = {}
         for component in components2:
             for node in component:
                 node_to_component2[node] = component
 
         # Compute intersection of equivalence classes of states
-        out = []
-        nodes_ok = set()
+        out: list[set[Expr]] = []
+        nodes_ok = set[Expr]()
         while components1:
             component1 = components1.pop()
             for node in component1:
@@ -2156,7 +2171,7 @@ class State(object):
                     continue
                 component2 = node_to_component2.get(node)
                 if component2 is None:
-                    if node.is_id() or node.is_mem():
+                    if is_id(node) or is_mem(node):
                         assert(node not in nodes_ok)
                         undefined.add(node)
                     continue
@@ -2166,7 +2181,7 @@ class State(object):
                 common = component1.intersection(component2)
                 if len(common) == 1:
                     # Intersection contains only one node => undefine node
-                    if node.is_id() or node.is_mem():
+                    if is_id(node) or is_mem(node):
                         assert(node not in nodes_ok)
                         undefined.add(node)
                         component2.discard(common.pop())
@@ -2185,11 +2200,11 @@ class State(object):
         # Discard remaining components2 elements
         for component in components2:
             for node in component:
-                if node.is_id() or node.is_mem():
+                if is_id(node) or is_mem(node):
                     assert(node not in nodes_ok)
                     undefined.add(node)
 
-        all_nodes = set()
+        all_nodes = set[Expr]()
         for common in out:
             all_nodes.update(common)
 
@@ -2199,7 +2214,6 @@ class State(object):
         )
 
         unionfind = UnionFind()
-        new_classes = []
         global_max_index = 0
         for common in out:
             min_index = None
@@ -2213,6 +2227,7 @@ class State(object):
             for node in common:
                 if node == master:
                     continue
+                assert master is not None
                 unionfind.add_equivalence(node, master)
 
         unionfind.index = global_max_index
@@ -2246,11 +2261,13 @@ class PropagateExpressions(object):
     D = [C+1]
     """
 
+    loc_db: LocationDB
+
     @staticmethod
-    def new_state():
+    def new_state() -> State:
         return State()
 
-    def merge_prev_states(self, ircfg, states, loc_key):
+    def merge_prev_states(self, ircfg: IRCFG, states: dict[LocKey, State|None], loc_key: LocKey) -> State:
         """
         Merge predecessors states of irblock at location @loc_key
         @ircfg: IRCfg instance
@@ -2258,37 +2275,39 @@ class PropagateExpressions(object):
         @loc_key: location of the current irblock
         """
 
-        prev_states = []
+        prev_states: list[tuple[LocKey, State|None]] = []
         for predecessor in ircfg.predecessors(loc_key):
             prev_states.append((predecessor, states[predecessor]))
 
-        filtered_prev_states = []
+        filtered_prev_states: list[State] = []
         for (_, prev_state) in prev_states:
             if prev_state is not None:
                 filtered_prev_states.append(prev_state)
 
-        prev_states = filtered_prev_states
-        if not prev_states:
+        filtered_prev_states = filtered_prev_states
+        if not filtered_prev_states:
             state = self.new_state()
-        elif len(prev_states) == 1:
-            state = prev_states[0].copy()
+        elif len(filtered_prev_states) == 1:
+            state = filtered_prev_states[0].copy()
         else:
-            while prev_states:
-                state = prev_states.pop()
+            state = None
+            while filtered_prev_states:
+                state = filtered_prev_states.pop()
                 if state is not None:
                     break
-            for prev_state in prev_states:
+            assert state is not None
+            for prev_state in filtered_prev_states:
                 state = state.merge(prev_state)
 
         return state
 
-    def update_state(self, irblock, state):
+    def update_state(self, irblock: IRBlock, state: State) -> tuple[IRBlock, bool]:
         """
         Propagate the @state through the @irblock
         @irblock: IRBlock instance
         @state: State instance
         """
-        new_assignblocks = []
+        new_assignblocks: list[AssignBlock] = []
         modified = False
 
         for assignblock in irblock:
@@ -2303,14 +2322,14 @@ class PropagateExpressions(object):
 
         return new_irblock, modified
 
-    def propagate(self, ssa, head, max_expr_depth=None):
+    def propagate(self, ssa: SSADiGraph, head: LocKey, max_expr_depth=None) -> bool:
         """
         Apply algorithm on the @ssa graph
         """
         ircfg = ssa.ircfg
         self.loc_db = ircfg.loc_db
         irblocks = ssa.ircfg.blocks
-        states = {}
+        states: dict[LocKey, State|None] = {}
         for loc_key, irblock in irblocks.items():
             states[loc_key] = None
 

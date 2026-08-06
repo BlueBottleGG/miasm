@@ -1,12 +1,16 @@
 from collections import deque
+from typing import Iterable, cast, overload, TYPE_CHECKING
 from future.utils import viewitems, viewvalues
 
-from miasm.expression.expression import ExprId, ExprAssign, ExprOp, \
-    ExprLoc, get_expr_ids
-from miasm.ir.ir import AssignBlock, IRBlock
 
+from miasm.expression.expression import Expr, ExprId, ExprAssign, ExprMem, ExprOp, \
+    ExprLoc, LocKey, get_expr_ids, is_id, is_mem, is_op
+from miasm.ir.ir import AssignBlock, IRBlock, IRCFG, IRBlockBase, IRCFGBase
 
-def sanitize_graph_head(ircfg, head):
+if TYPE_CHECKING:
+    from miasm.analysis.data_flow import IRBlockLivenessInfos
+
+def sanitize_graph_head(ircfg: IRCFG, head: LocKey):
     """
     In multiple algorithm, the @head of the ircfg may not have predecessors.
     The function transform the @ircfg in order to ensure this property
@@ -20,7 +24,7 @@ def sanitize_graph_head(ircfg, head):
     sub_head = ircfg.loc_db.add_location()
 
     # Duplicate graph, replacing references to head by sub_head
-    replaced_expr = {
+    replaced_expr: dict[Expr, Expr] = {
         ExprLoc(head, ircfg.IRDst.size):
         ExprLoc(sub_head, ircfg.IRDst.size)
     }
@@ -63,9 +67,15 @@ class SSA(object):
 
     then it cannot be tracked that RCX.0 == RDX.
     """
+    ircfg: IRCFG
+    _stack_rhs : dict[ExprId, int]
+    _stack_lhs : dict[ExprId, int]
+    ssa_variable_to_expr: dict[ExprId, ExprId]
+    expressions: dict[Expr, Expr]
+    ssa_to_location: dict[Expr, tuple[LocKey, int]]
+    immutable_ids: set[ExprId]
 
-
-    def __init__(self, ircfg):
+    def __init__(self, ircfg: IRCFG):
         """
         Initialises generic class for SSA
         :param ircfg: instance of IRCFG
@@ -89,14 +99,14 @@ class SSA(object):
         # Don't SSA IRDst
         self.immutable_ids = set([self.ircfg.IRDst])
 
-    def get_regs(self, expr):
+    def get_regs(self, expr: Expr) -> set[ExprId]:
         return get_expr_ids(expr)
 
     def transform(self, *args, **kwargs):
         """Transforms into SSA"""
         raise NotImplementedError("Abstract method")
 
-    def get_block(self, loc_key):
+    def get_block(self, loc_key: LocKey) -> IRBlock|None:
         """
         Returns an IRBlock
         :param loc_key: LocKey instance
@@ -106,7 +116,7 @@ class SSA(object):
 
         return irblock
 
-    def reverse_variable(self, ssa_var):
+    def reverse_variable(self, ssa_var: ExprId) -> ExprId:
         """
         Transforms a variable in SSA form into non-SSA form
         :param ssa_var: ExprId, variable in SSA form
@@ -122,7 +132,7 @@ class SSA(object):
         self._stack_lhs = {}
         self.ssa_to_location = {}
 
-    def _gen_var_expr(self, expr, stack):
+    def _gen_var_expr(self, expr: ExprId, stack: dict[ExprId, int]) -> ExprId:
         """
         Generates a variable expression in SSA form
         :param expr: variable expression which will be translated
@@ -136,7 +146,7 @@ class SSA(object):
 
         return ssa_var
 
-    def _transform_var_rhs(self, ssa_var):
+    def _transform_var_rhs(self, ssa_var: ExprId) -> ExprId:
         """
         Transforms a variable on the right hand side into SSA
         :param ssa_var: variable
@@ -149,7 +159,7 @@ class SSA(object):
         stack = self._stack_rhs
         return self._gen_var_expr(ssa_var, stack)
 
-    def _transform_var_lhs(self, expr):
+    def _transform_var_lhs(self, expr: ExprId) -> ExprId:
         """
         Transforms a variable on the left hand side into SSA
         :param expr: variable
@@ -167,13 +177,19 @@ class SSA(object):
 
         return ssa_var
 
-    def _transform_expression_lhs(self, dst):
+    @overload
+    def _transform_expression_lhs(self, dst: ExprMem) -> Expr: ...
+
+    @overload
+    def _transform_expression_lhs(self, dst: ExprId) -> ExprId: ...
+
+    def _transform_expression_lhs(self, dst: ExprId|ExprMem) -> Expr:
         """
         Transforms an expression on the left hand side into SSA
         :param dst: expression
         :return: expression in SSA form
         """
-        if dst.is_mem():
+        if is_mem(dst):
             # transform with last RHS instance
             ssa_var = self._transform_expression_rhs(dst)
         else:
@@ -185,7 +201,7 @@ class SSA(object):
 
         return ssa_var
 
-    def _transform_expression_rhs(self, src):
+    def _transform_expression_rhs(self, src: Expr) -> Expr:
         """
         Transforms an expression on the right hand side into SSA
         :param src: expression
@@ -195,7 +211,7 @@ class SSA(object):
         variables = self.get_regs(src)
         src_ssa = src
         # transform variables
-        to_replace = {}
+        to_replace: dict[Expr, Expr] = {}
         for expr in variables:
             ssa_var = self._transform_var_rhs(expr)
             to_replace[expr] = ssa_var
@@ -204,7 +220,7 @@ class SSA(object):
         return src_ssa
 
     @staticmethod
-    def _parallel_instructions(assignblk):
+    def _parallel_instructions(assignblk: AssignBlock) -> list[ExprAssign]:
         """
         Extracts the instruction from a AssignBlock.
 
@@ -217,7 +233,7 @@ class SSA(object):
         :param assignblk: assignblock
         :return: sorted list of expressions
         """
-        instructions = []
+        instructions: list[ExprAssign] = []
         for dst in assignblk:
             # dst = src
             aff = assignblk.dst2ExprAssign(dst)
@@ -230,7 +246,7 @@ class SSA(object):
         return instructions
 
     @staticmethod
-    def _convert_block(irblock, ssa_list):
+    def _convert_block(irblock: IRBlock, ssa_list: Iterable[ExprAssign]) -> IRBlock:
         """
         Transforms an IRBlock inplace into SSA
         :param irblock: IRBlock to be transformed
@@ -238,11 +254,11 @@ class SSA(object):
         """
         # iterator over SSA expressions
         ssa_iter = iter(ssa_list)
-        new_irs = []
+        new_irs: list[AssignBlock] = []
         # walk over IR blocks' assignblocks
         for assignblk in irblock.assignblks:
             # list of instructions
-            instructions = []
+            instructions: list[ExprAssign] = []
             # insert SSA instructions
             for _ in assignblk:
                 instructions.append(next(ssa_iter))
@@ -250,7 +266,7 @@ class SSA(object):
             new_irs.append(AssignBlock(instructions, assignblk.instr))
         return IRBlock(irblock.loc_db, irblock.loc_key, new_irs)
 
-    def _rename_expressions(self, loc_key):
+    def _rename_expressions(self, loc_key: LocKey):
         """
         Transforms variables and expressions
         of an IRBlock into SSA.
@@ -261,7 +277,7 @@ class SSA(object):
         :param loc_key: IRBlock loc_key
         """
         # list of IRBlock's SSA expressions
-        ssa_expressions_block = []
+        ssa_expressions_block: list[ExprAssign] = []
 
         # retrieve IRBlock
         irblock = self.get_block(loc_key)
@@ -274,7 +290,7 @@ class SSA(object):
             # list of parallel instructions
             instructions = self._parallel_instructions(assignblk)
             # list for transformed RHS expressions
-            rhs = deque()
+            rhs = deque[Expr]()
 
             # transform RHS
             for expr in instructions:
@@ -288,6 +304,7 @@ class SSA(object):
                 if expr.dst in self.immutable_ids or expr.dst in self.ssa_variable_to_expr:
                     dst_ssa = expr.dst
                 else:
+                    assert is_mem(expr.dst) or is_id(expr.dst)
                     dst_ssa = self._transform_expression_lhs(expr.dst)
 
                 # retrieve corresponding RHS expression
@@ -317,14 +334,14 @@ class SSABlock(SSA):
       expression through iterative resolving of the RHS
     """
 
-    def transform(self, loc_key):
+    def transform(self, loc_key: LocKey):
         """
         Transforms a block into SSA form
         :param loc_key: IRBlock loc_key
         """
         self._rename_expressions(loc_key)
 
-    def reassemble_expr(self, expr):
+    def reassemble_expr(self, expr: Expr) -> Expr:
         """
         Reassembles an expression in SSA form into a solely non-SSA expression
         :param expr: expression
@@ -359,8 +376,7 @@ class SSAPath(SSABlock):
     It handles
     - transformation of a path of IRBlocks into SSA
     """
-
-    def transform(self, path):
+    def transform(self, path: Iterable[LocKey]):
         """
         Transforms a path into SSA
         :param path: list of IRBlock loc_key
@@ -381,9 +397,11 @@ class SSADiGraph(SSA):
     """
 
     PHI_STR = 'Phi'
+    defs: dict[ExprId, set[LocKey]]
+    _phinodes: dict[LocKey, dict[ExprId, ExprId|ExprOp]]
+    graph: IRCFG
 
-
-    def __init__(self, ircfg):
+    def __init__(self, ircfg: IRCFG):
         """
         Initialises SSA class for directed graphs
         :param ircfg: instance of IRCFG
@@ -400,7 +418,7 @@ class SSADiGraph(SSA):
         self.graph = ircfg
 
 
-    def transform(self, head):
+    def transform(self, head: LocKey):
         """Transforms into SSA"""
         sanitize_graph_head(self.graph, head)
         self._init_variable_defs(head)
@@ -416,7 +434,7 @@ class SSADiGraph(SSA):
         self.defs = {}
         self._phinodes = {}
 
-    def _init_variable_defs(self, head):
+    def _init_variable_defs(self, head: LocKey):
         """
         Initialises all variable definitions and
         assigns the corresponding IRBlocks.
@@ -425,7 +443,7 @@ class SSADiGraph(SSA):
         a set of IRBlocks in which the variable gets assigned
         """
 
-        visited_loc = set()
+        visited_loc: set[LocKey] = set()
         for loc_key in self.graph.walk_depth_first_forward(head):
             irblock = self.get_block(loc_key)
             if irblock is None:
@@ -436,7 +454,7 @@ class SSADiGraph(SSA):
             for assignblk in irblock.assignblks:
                 for dst in assignblk:
                     # enforce ExprId
-                    if dst.is_id():
+                    if is_id(dst):
                         # exclude immutable ids
                         if dst in self.immutable_ids or dst in self.ssa_variable_to_expr:
                             continue
@@ -445,7 +463,7 @@ class SSADiGraph(SSA):
         if visited_loc != set(self.graph.blocks):
             raise RuntimeError("Cannot operate on a non connected graph")
 
-    def _place_phi(self, head):
+    def _place_phi(self, head: LocKey):
         """
         For all blocks, empty phi functions will be placed for every
         variable in the block's dominance frontier.
@@ -463,9 +481,9 @@ class SSADiGraph(SSA):
         frontier = self.graph.compute_dominance_frontier(head)
 
         for variable in self.defs:
-            done = set()
-            todo = set()
-            intodo = set()
+            done = set[LocKey]()
+            todo = set[LocKey]()
+            intodo = set[LocKey]()
 
             for loc_key in self.defs[variable]:
                 todo.add(loc_key)
@@ -475,7 +493,7 @@ class SSADiGraph(SSA):
                 loc_key = todo.pop()
 
                 # walk through block's dominance frontier
-                for node in frontier.get(loc_key, []):
+                for node in frontier.get(loc_key, list[LocKey]()):
                     if node in done:
                         continue
                     # place empty phi functions for a variable
@@ -489,7 +507,7 @@ class SSADiGraph(SSA):
                         intodo.add(node)
                         todo.add(node)
 
-    def _gen_empty_phi(self, expr):
+    def _gen_empty_phi(self, expr: Expr) -> ExprAssign:
         """
         Generates an empty phi function for a variable
         :param expr: variable
@@ -498,7 +516,7 @@ class SSADiGraph(SSA):
         phi = ExprId(self.PHI_STR, expr.size)
         return ExprAssign(expr, phi)
 
-    def _fill_phi(self, *args):
+    def _fill_phi(self, *args: Expr) -> ExprOp:
         """
         Fills a phi function with variables.
 
@@ -509,7 +527,7 @@ class SSADiGraph(SSA):
         """
         return ExprOp(self.PHI_STR, *set(args))
 
-    def _rename(self, head):
+    def _rename(self, head: LocKey):
         """
         Transforms each variable expression in the CFG into SSA
         by traversing the dominator tree in depth-first search.
@@ -550,7 +568,7 @@ class SSADiGraph(SSA):
             for _ in dominator_tree.successors_iter(loc_key):
                 stack.append(self._stack_rhs)
 
-    def _rename_phi_lhs(self, loc_key):
+    def _rename_phi_lhs(self, loc_key: LocKey):
         """
         Transforms phi function's expressions of an IRBlock
         on the left hand side into SSA
@@ -565,7 +583,7 @@ class SSADiGraph(SSA):
                 # transform variables on LHS inplace
                 self._phinodes[loc_key][self._transform_expression_lhs(dst)] = self._phinodes[loc_key].pop(dst)
 
-    def _rename_phi_rhs(self, successor):
+    def _rename_phi_rhs(self, successor: LocKey):
         """
         Transforms the right hand side of each successor's phi function
         into SSA. Each transformed expression of a phi function's
@@ -578,17 +596,18 @@ class SSADiGraph(SSA):
         # if successor is in block's dominance frontier
         if successor in self._phinodes:
             # walk over all variables on LHS
-            for dst, src in list(viewitems(self._phinodes[successor])):
+            for dst, src in list(self._phinodes[successor].items()):
                 # transform variable on RHS in non-SSA form
                 expr = self.reverse_variable(dst)
                 # transform expr into it's SSA form using current stack
                 src_ssa = self._transform_expression_rhs(expr)
 
                 # Add src_ssa to phi args
-                if src.is_id(self.PHI_STR):
+                if is_id(src, self.PHI_STR):
                     # phi function is empty
                     expr = self._fill_phi(src_ssa)
                 else:
+                    assert is_op(src, self.PHI_STR)
                     # phi function contains at least one value
                     expr = self._fill_phi(src_ssa, *src.args)
 
@@ -622,20 +641,21 @@ class SSADiGraph(SSA):
                 new_irblock = IRBlock(self.ircfg.loc_db, loc_key, [assignblk] + list(irblock.assignblks))
             self.ircfg.blocks[loc_key] = new_irblock
 
-    def _fix_no_def_var(self, head):
+    def _fix_no_def_var(self, head: LocKey):
         """
         Replace phi source variables which are not ssa vars by ssa vars.
         @head: loc_key of the graph head
         """
-        var_to_insert = set()
+        var_to_insert = set[ExprId]()
         for loc_key in self._phinodes:
-            for dst, sources in viewitems(self._phinodes[loc_key]):
+            for dst, sources in self._phinodes[loc_key].items():
+                assert is_op(sources, self.PHI_STR)
                 for src in sources.args:
                     if src in self.ssa_variable_to_expr:
                         continue
-                    var_to_insert.add(src)
-        var_to_newname = {}
-        newname_to_var = {}
+                    var_to_insert.add(cast(ExprId, src))
+        var_to_newname: dict[ExprId, ExprId] = {}
+        newname_to_var: dict[ExprId, ExprId] = {}
         for var in var_to_insert:
             new_var = self._transform_var_lhs(var)
             var_to_newname[var] = new_var
@@ -652,20 +672,20 @@ class SSADiGraph(SSA):
 
         # Updt structure
         for loc_key in self._phinodes:
-            for dst, sources in viewitems(self._phinodes[loc_key]):
-                self._phinodes[loc_key][dst] = sources.replace_expr(var_to_newname)
+            for dst, sources in self._phinodes[loc_key].items():
+                self._phinodes[loc_key][dst] = sources.replace_expr(var_to_newname) # type: ignore
 
-        for var, (loc_key, index) in list(viewitems(self.ssa_to_location)):
+        for var, (loc_key, index) in list(self.ssa_to_location.items()):
             if loc_key == head:
                 self.ssa_to_location[var] = loc_key, index + 1
 
-        for newname, var in viewitems(newname_to_var):
+        for newname, var in newname_to_var.items():
             self.ssa_to_location[newname] = head, 0
             self.ssa_variable_to_expr[newname] = var
             self.expressions[newname] = var
 
 
-def irblock_has_phi(irblock):
+def irblock_has_phi(irblock: IRBlock|IRBlockLivenessInfos) -> bool:
     """
     Return True if @irblock has Phi assignments
     @irblock: IRBlock instance
@@ -673,7 +693,7 @@ def irblock_has_phi(irblock):
     if not irblock.assignblks:
         return False
     for src in viewvalues(irblock[0]):
-        return src.is_op('Phi')
+        return is_op(src, 'Phi')
     return False
 
 
@@ -687,7 +707,7 @@ class Varinfo(object):
         self.index = index
 
 
-def get_var_assignment_src(ircfg, node, variables):
+def get_var_assignment_src[B: IRBlockBase](ircfg: IRCFGBase[B], node: LocKey, variables: set[Expr]) -> Expr|None:
     """
     Return the variable of @variables which is written by the irblock at @node
     @node: Location
@@ -703,16 +723,16 @@ def get_var_assignment_src(ircfg, node, variables):
     return None
 
 
-def get_phi_sources_parent_block(ircfg, loc_key, sources):
+def get_phi_sources_parent_block(ircfg: IRCFGBase, loc_key: LocKey, sources) -> dict[Expr, set[LocKey]]:
     """
     Return a dictionary linking a variable to it's direct parent label
     which belong to a path which affects the node.
     @loc_key: the starting node
     @sources: set of variables to resolve
     """
-    source_to_parent = {}
+    source_to_parent: dict[Expr, set[LocKey]] = {}
     for parent in ircfg.predecessors(loc_key):
-        done = set()
+        done = set[LocKey]()
         todo = set([parent])
         found = False
         while todo:

@@ -174,7 +174,7 @@ class AssignBlock(object):
     _assigns: dict[m2_expr.Expr, m2_expr.Expr]
     _instr: list[instruction]|None
 
-    def __init__(self, irs: dict[m2_expr.Expr, m2_expr.Expr]|list[m2_expr.ExprAssign]|None=None, instr:list[instruction]|None=None):
+    def __init__[D: m2_expr.Expr, S: m2_expr.Expr](self, irs: dict[D, S]|list[m2_expr.ExprAssign]|None=None, instr:list[instruction]|None=None):
         """Create a new AssignBlock
         @irs: (optional) sequence of ExprAssign, or dictionary dst (Expr) -> src
               (Expr)
@@ -377,7 +377,7 @@ class AssignBlock(object):
         @dst: Expr instance"""
         return m2_expr.ExprAssign(dst, self[dst])
 
-    def simplify(self, simplifier: ExpressionSimplifier) -> "AssignBlock":
+    def simplify(self, simplifier: Callable[[m2_expr.Expr], m2_expr.Expr]) -> "AssignBlock":
         """
         Return a new AssignBlock with expression simplified
 
@@ -402,7 +402,11 @@ class AssignBlock(object):
             out.append("")
         return "\n".join(out)
 
-class IRBlock(object):
+class IRBlockBase:
+    def __iter__(self) -> Iterator[AssignBlock]:
+        raise ValueError("Abstract method")
+
+class IRBlock(IRBlockBase):
     """Intermediate representation block object.
 
     Stand for an intermediate representation  basic block.
@@ -422,6 +426,7 @@ class IRBlock(object):
         @loc_key: LocKey of the IR basic block
         @assignblks: list of AssignBlock
         """
+        super().__init__()
 
         assert isinstance(loc_key, m2_expr.LocKey)
         self._loc_key = loc_key
@@ -471,11 +476,11 @@ class IRBlock(object):
         warnings.warn('DEPRECATION WARNING: use "irblock.assignblks" instead of "irblock.irs"')
         return self._assignblks
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[AssignBlock]:
         """Iterate on assignblks"""
         return self._assignblks.__iter__()
 
-    def __getitem__(self, index):
+    def __getitem__(self, index) -> AssignBlock:
         """Getitem on assignblks"""
         return self._assignblks.__getitem__(index)
 
@@ -593,8 +598,16 @@ class irbloc(IRBlock):
         super(irbloc, self).__init__(loc_key, irs)
 
 
+class IRCFGBase[B: IRBlockBase](DiGraph[m2_expr.LocKey]):
+    def __init__(*args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    @property
+    def blocks(self) -> dict[m2_expr.LocKey, B]:
+        raise ValueError("abstract method")
+
 AddressT = m2_expr.LocKey|m2_expr.ExprLoc|m2_expr.ExprInt|int
-class IRCFG(DiGraph[m2_expr.LocKey]):
+class IRCFG(IRCFGBase[IRBlock]):
 
     """DiGraph for IR instances"""
 
@@ -749,7 +762,7 @@ class IRCFG(DiGraph[m2_expr.LocKey]):
         return out
 
 
-    def simplify(self, simplifier: ExpressionSimplifier) -> bool:
+    def simplify(self, simplifier: Callable[[m2_expr.Expr], m2_expr.Expr]) -> bool:
         """
         Simplify expressions in each irblocks
         @simplifier: ExpressionSimplifier instance
