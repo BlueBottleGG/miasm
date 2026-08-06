@@ -5,7 +5,7 @@ from functools import reduce
 from future.utils import viewitems, viewvalues
 
 from miasm.core.utils import printable
-from miasm.expression.expression import LocKey, ExprLoc
+from miasm.expression.expression import Expr, LocKey, ExprLoc
 
 
 class LocationDB(object):
@@ -51,6 +51,13 @@ class LocationDB(object):
     first_name
     """
 
+    _loc_keys: set[LocKey]
+    _loc_key_to_offset: dict[LocKey, int]
+    _loc_key_to_names: dict[LocKey, set[str]]
+    _name_to_loc_key: dict[str, LocKey]
+    _offset_to_loc_key: dict[int, LocKey]
+    _loc_key_num: int
+
     def __init__(self):
         # Known LocKeys
         self._loc_keys = set()
@@ -64,7 +71,7 @@ class LocationDB(object):
         # Counter for new LocKey generation
         self._loc_key_num = 0
 
-    def get_location_offset(self, loc_key):
+    def get_location_offset(self, loc_key: LocKey) -> int|None:
         """
         Return the offset of @loc_key if any, None otherwise.
         @loc_key: LocKey instance
@@ -72,7 +79,7 @@ class LocationDB(object):
         assert isinstance(loc_key, LocKey)
         return self._loc_key_to_offset.get(loc_key)
 
-    def get_location_names(self, loc_key):
+    def get_location_names(self, loc_key: LocKey) -> frozenset[str]:
         """
         Return the frozenset of names associated to @loc_key
         @loc_key: LocKey instance
@@ -80,7 +87,7 @@ class LocationDB(object):
         assert isinstance(loc_key, LocKey)
         return frozenset(self._loc_key_to_names.get(loc_key, set()))
 
-    def get_name_location(self, name):
+    def get_name_location(self, name: str) -> LocKey|None:
         """
         Return the LocKey of @name if any, None otherwise.
         @name: target name
@@ -88,7 +95,7 @@ class LocationDB(object):
         assert isinstance(name, str)
         return self._name_to_loc_key.get(name)
 
-    def get_or_create_name_location(self, name):
+    def get_or_create_name_location(self, name: str) -> LocKey:
         """
         Return the LocKey of @name if any, create one otherwise.
         @name: target name
@@ -99,14 +106,14 @@ class LocationDB(object):
             return loc_key
         return self.add_location(name=name)
 
-    def get_offset_location(self, offset):
+    def get_offset_location(self, offset: int) -> LocKey|None:
         """
         Return the LocKey of @offset if any, None otherwise.
         @offset: target offset
         """
         return self._offset_to_loc_key.get(offset)
 
-    def get_or_create_offset_location(self, offset):
+    def get_or_create_offset_location(self, offset: int) -> LocKey:
         """
         Return the LocKey of @offset if any, create one otherwise.
         @offset: target offset
@@ -116,7 +123,7 @@ class LocationDB(object):
             return loc_key
         return self.add_location(offset=offset)
 
-    def get_name_offset(self, name):
+    def get_name_offset(self, name: str) -> int|None:
         """
         Return the offset of @name if any, None otherwise.
         @name: target name
@@ -127,7 +134,7 @@ class LocationDB(object):
             return None
         return self.get_location_offset(loc_key)
 
-    def add_location_name(self, loc_key, name):
+    def add_location_name(self, loc_key: LocKey, name: str):
         """Associate a name @name to a given @loc_key
         @name: str instance
         @loc_key: LocKey instance
@@ -141,7 +148,7 @@ class LocationDB(object):
         self._loc_key_to_names.setdefault(loc_key, set()).add(name)
         self._name_to_loc_key[name] = loc_key
 
-    def remove_location_name(self, loc_key, name):
+    def remove_location_name(self, loc_key: LocKey, name: str):
         """Disassociate a name @name from a given @loc_key
         Fail if @name is not already associated to @loc_key
         @name: str instance
@@ -158,7 +165,7 @@ class LocationDB(object):
         del self._name_to_loc_key[name]
         self._loc_key_to_names[loc_key].remove(name)
 
-    def set_location_offset(self, loc_key, offset, force=False):
+    def set_location_offset(self, loc_key: LocKey, offset: int, force=False):
         """Associate the offset @offset to an LocKey @loc_key
 
         If @force is set, override silently. Otherwise, if an offset is already
@@ -183,7 +190,7 @@ class LocationDB(object):
         self._offset_to_loc_key[offset] = loc_key
         self._loc_key_to_offset[loc_key] = offset
 
-    def unset_location_offset(self, loc_key):
+    def unset_location_offset(self, loc_key: LocKey):
         """Disassociate LocKey @loc_key's offset
 
         Fail if there is already no offset associate with it
@@ -209,7 +216,7 @@ class LocationDB(object):
         for name, loc_key in viewitems(self._name_to_loc_key):
             assert name in self._loc_key_to_names[loc_key]
 
-    def find_free_name(self, name):
+    def find_free_name(self, name: str) -> str:
         """
         If @name is not known in DB, return it
         Else append an index to it corresponding to the next unknown name
@@ -226,7 +233,7 @@ class LocationDB(object):
                 return new_name
             i += 1
 
-    def add_location(self, name=None, offset=None, strict=True):
+    def add_location(self, name: str|None=None, offset: int|None=None, strict=True) -> LocKey:
         """Add a new location in the locationDB. Returns the corresponding LocKey.
         If @name is set, also associate a name to this new location.
         If @offset is set, also associate an offset to this new location.
@@ -274,7 +281,7 @@ class LocationDB(object):
         else:
             # Non-strict mode
             if name_loc_key is not None:
-                known_offset = self.get_offset_location(name_loc_key)
+                known_offset = self.get_location_offset(name_loc_key)
                 if known_offset is None:
                     if offset is not None:
                         self.set_location_offset(name_loc_key, offset)
@@ -289,7 +296,7 @@ class LocationDB(object):
             elif offset_loc_key is not None:
                 if name is not None:
                     # Check for already known name are checked above
-                    return self.add_location_name(offset_loc_key, name)
+                    self.add_location_name(offset_loc_key, name)
                 # Offset already known, no name specified
                 return offset_loc_key
 
@@ -309,7 +316,7 @@ class LocationDB(object):
 
         return loc_key
 
-    def remove_location(self, loc_key):
+    def remove_location(self, loc_key: LocKey):
         """
         Delete the location corresponding to @loc_key
         @loc_key: LocKey instance
@@ -324,7 +331,7 @@ class LocationDB(object):
         self._offset_to_loc_key.pop(offset, None)
         self._loc_keys.remove(loc_key)
 
-    def pretty_str(self, loc_key):
+    def pretty_str(self, loc_key: LocKey) -> str:
         """Return a human readable version of @loc_key, according to information
         available in this LocationDB instance"""
         names = self.get_location_names(loc_key)
@@ -372,7 +379,7 @@ class LocationDB(object):
             )
         return "\n".join(out)
 
-    def merge(self, location_db):
+    def merge(self, location_db: "LocationDB"):
         """Merge with another LocationDB @location_db
 
         WARNING: old reference to @location_db information (such as LocKeys)
@@ -396,7 +403,7 @@ class LocationDB(object):
                 if name not in cur_names and name != init_name:
                     self.add_location_name(loc_key, name=name)
 
-    def canonize_to_exprloc(self, expr):
+    def canonize_to_exprloc(self, expr: Expr) -> Expr:
         """
         If expr is ExprInt, return ExprLoc with corresponding loc_key
         Else, return expr

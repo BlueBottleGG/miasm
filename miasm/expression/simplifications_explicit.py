@@ -1,9 +1,14 @@
+from typing import TYPE_CHECKING
+
 from miasm.core.utils import size2mask
-from miasm.expression.expression import ExprInt, ExprCond, ExprCompose, \
+from miasm.expression.expression import Expr, ExprOp, ExprInt, ExprCond, ExprCompose, \
     TOK_EQUAL
 
+if TYPE_CHECKING:
+    from miasm.expression.simplifications import ExpressionSimplifier
 
-def simp_ext(_, expr):
+
+def simp_ext(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
     if expr.op.startswith('zeroExt_'):
         arg = expr.args[0]
         if expr.size == arg.size:
@@ -25,7 +30,7 @@ def simp_ext(_, expr):
     return expr
 
 
-def simp_flags(_, expr):
+def simp_flags(_: ExpressionSimplifier, expr: ExprOp):
     args = expr.args
 
     if expr.is_op("FLAG_EQ"):

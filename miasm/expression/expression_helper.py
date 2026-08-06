@@ -18,18 +18,19 @@
 
 # Expressions manipulation functions
 from builtins import range
+from dataclasses import dataclass
 import itertools
 import collections
 import random
 import string
+from typing import Callable, Hashable, Sequence, overload
 import warnings
 
 from future.utils import viewitems, viewvalues
 
 import miasm.expression.expression as m2_expr
 
-
-def parity(a):
+def parity(a: int) -> int:
     tmp = (a) & 0xFF
     cpt = 1
     while tmp != 0:
@@ -38,13 +39,13 @@ def parity(a):
     return cpt
 
 
-def merge_sliceto_slice(expr):
+def merge_sliceto_slice(expr: m2_expr.ExprCompose) -> list[m2_expr.Expr]:
     """
     Apply basic factorisation on ExprCompose sub components
     @expr: ExprCompose
     """
 
-    out_args = []
+    out_args: list[m2_expr.Expr] = []
     last_index = 0
     for index, arg in expr.iter_args():
         # Init
@@ -86,21 +87,21 @@ op_propag_cst = ['+', '*', '^', '&', '|', '>>',
                  "/", "%", 'sdiv', 'smod', 'umod', 'udiv','**']
 
 
-def is_pure_int(e):
+def is_pure_int(e: m2_expr.Expr) -> bool:
     """
     return True if expr is only composed with integers
     [!] ExprCond returns True if src1 and src2 are integers
     """
-    def modify_cond(e):
+    def modify_cond(e: m2_expr.Expr) -> m2_expr.Expr:
         if isinstance(e, m2_expr.ExprCond):
             return e.src1 | e.src2
         return e
 
-    def find_int(e, s):
+    def find_int(e: m2_expr.Expr, s: set[m2_expr.Expr]) -> m2_expr.Expr:
         if isinstance(e, m2_expr.ExprId) or isinstance(e, m2_expr.ExprMem):
             s.add(e)
         return e
-    s = set()
+    s = set[m2_expr.Expr]()
     new_e = e.visit(modify_cond)
     new_e.visit(lambda x: find_int(x, s))
     if s:
@@ -108,7 +109,7 @@ def is_pure_int(e):
     return True
 
 
-def is_int_or_cond_src_int(e):
+def is_int_or_cond_src_int(e: m2_expr.Expr) -> bool:
     if isinstance(e, m2_expr.ExprInt):
         return True
     if isinstance(e, m2_expr.ExprCond):
@@ -116,13 +117,26 @@ def is_int_or_cond_src_int(e):
                 isinstance(e.src2, m2_expr.ExprInt))
     return False
 
+@overload
+def fast_unify[T: Hashable](
+    seq: Sequence[T],
+    idfun: None = None,
+) -> list[T]: ...
 
-def fast_unify(seq, idfun=None):
+
+@overload
+def fast_unify[T, H: Hashable](
+    seq: Sequence[T],
+    idfun: Callable[[T], H],
+) -> list[T]: ...
+
+
+def fast_unify[T](seq: Sequence[T], idfun: Callable[[T], Hashable]|None=None) -> list[T]:
     # order preserving unifying list function
     if idfun is None:
         idfun = lambda x: x
-    seen = {}
-    result = []
+    seen: dict[Hashable, int] = {}
+    result: list[T] = []
     for item in seq:
         marker = idfun(item)
 
@@ -132,7 +146,7 @@ def fast_unify(seq, idfun=None):
         result.append(item)
     return result
 
-def get_missing_interval(all_intervals, i_min=0, i_max=32):
+def get_missing_interval(all_intervals: list[tuple[int, int]], i_min: int=0, i_max: int=32) -> list[tuple[int, int]]:
     """Return a list of missing interval in all_interval
     @all_interval: list of (int, int)
     @i_min: int, minimal missing interval bound
@@ -142,7 +156,7 @@ def get_missing_interval(all_intervals, i_min=0, i_max=32):
     my_intervals.sort()
     my_intervals.append((i_max, i_max))
 
-    missing_i = []
+    missing_i: list[tuple[int, int]] = []
     last_pos = i_min
     for start, stop in my_intervals:
         if last_pos != start:
@@ -158,7 +172,7 @@ class Variables_Identifier(object):
     - original expression with variables translated
     """
 
-    def __init__(self, expr, var_prefix="v"):
+    def __init__(self, expr: m2_expr.Expr, var_prefix: str="v"):
         """Set the expression @expr to handle and launch variable identification
         process
         @expr: Expr instance
@@ -166,8 +180,8 @@ class Variables_Identifier(object):
 
         # Init
         self.var_indice = itertools.count()
-        self.var_asked = set()
-        self._vars = {} # VarID -> Expr
+        self.var_asked = set[m2_expr.Expr]()
+        self._vars: dict[m2_expr.ExprId, m2_expr.Expr] = {} # VarID -> Expr
         self.var_prefix = var_prefix
 
         # Launch recurrence
@@ -177,13 +191,13 @@ class Variables_Identifier(object):
         has_change = True
         while has_change:
             has_change = False
-            for var_id, var_value in list(viewitems(self._vars)):
+            for var_id, var_value in list(self._vars.items()):
                 cur = var_value
 
                 # Do not replace with itself
-                to_replace = {
+                to_replace: dict[m2_expr.Expr, m2_expr.Expr] = {
                     v_val:v_id
-                    for v_id, v_val in viewitems(self._vars)
+                    for v_id, v_val in self._vars.items()
                     if v_id != var_id
                 }
                 var_value = var_value.replace_expr(to_replace)
@@ -198,17 +212,17 @@ class Variables_Identifier(object):
         self._equation = expr.replace_expr(
             {
                 v_val: v_id for v_id, v_val
-                in viewitems(self._vars)
+                in self._vars.items()
             }
         )
 
         # Compute variables dependencies
-        self._vars_ordered = collections.OrderedDict()
+        self._vars_ordered = collections.OrderedDict[m2_expr.ExprId, m2_expr.Expr]()
         todo = set(self._vars)
-        needs = {}
+        needs: dict[m2_expr.ExprId, list[m2_expr.Expr]] = {}
 
         ## Build initial needs
-        for var_id, var_expr in viewitems(self._vars):
+        for var_id, var_expr in self._vars.items():
             ### Handle corner cases while using Variable Identifier on an
             ### already computed equation
             needs[var_id] = [
@@ -221,7 +235,7 @@ class Variables_Identifier(object):
 
         ## Build order list
         while todo:
-            done = set()
+            done = set[m2_expr.ExprId]()
             for var_id in todo:
                 all_met = True
                 for need in needs[var_id]:
@@ -240,13 +254,13 @@ class Variables_Identifier(object):
             for element_done in done:
                 todo.remove(element_done)
 
-    def is_var_identifier(self, expr):
+    def is_var_identifier(self, expr: m2_expr.Expr):
         "Return True iff @expr is a variable identifier"
         if not isinstance(expr, m2_expr.ExprId):
             return False
         return expr in self._vars
 
-    def find_variables_rec(self, expr):
+    def find_variables_rec(self, expr: m2_expr.Expr):
         """Recursive method called by find_variable to expand @expr.
         Set @var_names and @var_values.
         This implementation is faster than an expression visitor because
@@ -255,7 +269,7 @@ class Variables_Identifier(object):
 
         if (expr in self.var_asked):
             # Expr has already been asked
-            if expr not in viewvalues(self._vars):
+            if expr not in self._vars.values():
                 # Create var
                 identifier = m2_expr.ExprId(
                     "%s%s" % (
@@ -304,11 +318,11 @@ class Variables_Identifier(object):
             raise NotImplementedError("Type not handled: %s" % expr)
 
     @property
-    def vars(self):
+    def vars(self) -> collections.OrderedDict[m2_expr.ExprId, m2_expr.Expr]:
         return self._vars_ordered
 
     @property
-    def equation(self):
+    def equation(self) -> m2_expr.Expr:
         return self._equation
 
     def __str__(self):
@@ -330,7 +344,7 @@ class ExprRandom(object):
     # Number max value
     number_max = 0xFFFFFFFF
     # Available operations
-    operations_by_args_number = {1: ["-"],
+    operations_by_args_number: dict[str|int, list[str]] = {1: ["-"],
                                  2: ["<<", "<<<", ">>", ">>>"],
                                  "2+": ["+", "*", "&", "|", "^"],
                                  }
@@ -346,7 +360,7 @@ class ExprRandom(object):
     memory_max_address_size = 32
     # Reuse already generated elements to mimic a more realistic behavior
     reuse_element = True
-    generated_elements = {} # (depth, size) -> [Expr]
+    generated_elements: dict[tuple[int, int], list[m2_expr.Expr]] = {} # (depth, size) -> [Expr]
 
     @classmethod
     def identifier(cls, size=32):
@@ -386,6 +400,7 @@ class ExprRandom(object):
                 cls.operations_max_args_number
             )
         else:
+            assert isinstance(operand_type, int)
             number_args = operand_type
 
         args = [cls._gen(size=size, depth=depth - 1)
@@ -514,13 +529,13 @@ class CondConstraint(object):
     # str of the associated operator
     operator = ""
 
-    def __init__(self, expr):
+    def __init__(self, expr: m2_expr.Expr):
         self.expr = expr
 
     def __repr__(self):
         return "<%s %s 0>" % (self.expr, self.operator)
 
-    def to_constraint(self):
+    def to_constraint(self) -> m2_expr.ExprAssign:
         """Transform itself into a constraint using Expr"""
         raise NotImplementedError("Abstract method")
 
@@ -530,7 +545,7 @@ class CondConstraintZero(CondConstraint):
     """Stand for a constraint like 'A == 0'"""
     operator = m2_expr.TOK_EQUAL
 
-    def to_constraint(self):
+    def to_constraint(self) -> m2_expr.ExprAssign:
         return m2_expr.ExprAssign(self.expr, m2_expr.ExprInt(0, self.expr.size))
 
 
@@ -544,11 +559,14 @@ class CondConstraintNotZero(CondConstraint):
         return m2_expr.ExprAssign(cst1, m2_expr.ExprCond(self.expr, cst1, cst2))
 
 
-ConstrainedValue = collections.namedtuple("ConstrainedValue",
-                                          ["constraints", "value"])
+# ConstrainedValue = collections.namedtuple("ConstrainedValue",
+#                                           ["constraints", "value"])
+@dataclass(frozen=True)
+class ConstrainedValue:
+    constraints: frozenset[CondConstraint]
+    value: m2_expr.Expr
 
-
-class ConstrainedValues(set):
+class ConstrainedValues(set[ConstrainedValue]):
 
     """Set of ConstrainedValue"""
 
@@ -561,7 +579,7 @@ class ConstrainedValues(set):
         return "\n".join(out)
 
 
-def possible_values(expr):
+def possible_values(expr: m2_expr.Expr):
     """Return possible values for expression @expr, associated with their
     condition constraint as a ConstrainedValues instance
     @expr: Expr instance

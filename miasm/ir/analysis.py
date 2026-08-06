@@ -4,7 +4,7 @@ import warnings
 import logging
 
 from miasm.ir.ir import Lifter, AssignBlock
-from miasm.expression.expression import ExprOp, ExprAssign
+from miasm.expression.expression import ExprLoc, ExprOp, ExprAssign
 
 
 log = logging.getLogger("analysis")
@@ -28,7 +28,7 @@ class LifterModelCall(Lifter):
     """
     ret_reg = None
 
-    def call_effects(self, addr, instr):
+    def call_effects(self, addr: ExprLoc, instr):
         """Default modelisation of a function call to @addr. This may be used to:
 
         * insert dependencies to arguments (stack base, registers, ...)

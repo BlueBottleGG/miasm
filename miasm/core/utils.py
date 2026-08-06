@@ -148,7 +148,7 @@ def iterbytes(string):
 def int_to_byte(value):
     return struct.pack('B', value)
 
-def cmp_elts(elt1, elt2):
+def cmp_elts(elt1, elt2) -> int:
     return (elt1 > elt2) - (elt1 < elt2)
 
 

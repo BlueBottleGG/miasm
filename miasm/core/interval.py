@@ -1,4 +1,5 @@
 from __future__ import print_function
+from typing import Self
 
 INT_EQ = 0      # Equivalent
 INT_B_IN_A = 1  # B in A
@@ -9,7 +10,7 @@ INT_JOIN_AB = 4 # B starts at the end of A
 INT_JOIN_BA = 5 # A starts at the end of B
 
 
-def cmp_interval(inter1, inter2):
+def cmp_interval(inter1: tuple[int, int], inter2: tuple[int, int]):
     """Compare @inter1 and @inter2 and returns the associated INT_* case
     @inter1, @inter2: interval instance
     """
@@ -36,8 +37,8 @@ class interval(object):
     """Stands for intervals with integer bounds
 
     Offers common methods to work with interval"""
-
-    def __init__(self, bounds=None):
+    intervals: list[tuple[int, int]]
+    def __init__(self, bounds:"interval"|list[tuple[int, int]]|None=None):
         """Instance an interval object
         @bounds: (optional) list of (int, int) and/or interval instance
         """
@@ -45,7 +46,7 @@ class interval(object):
             bounds = []
         elif isinstance(bounds, interval):
             bounds = bounds.intervals
-        self.is_cannon = False
+        self.is_cannon: bool = False
         self.intervals = bounds
         self.cannon()
 
@@ -55,13 +56,13 @@ class interval(object):
             yield inter
 
     @staticmethod
-    def cannon_list(tmp):
+    def cannon_list(tmp: list[tuple[int, int]]) -> list[tuple[int, int]]:
         """
         Return a cannonizes list of intervals
         @tmp: list of (int, int)
         """
         tmp = sorted([x for x in tmp if x[0] <= x[1]])
-        out = []
+        out: list[tuple[int, int]] = []
         if not tmp:
             return out
         out.append(tmp.pop())
@@ -125,7 +126,7 @@ class interval(object):
     def __ne__(self, other):
         return not self.__eq__(other)
 
-    def union(self, other):
+    def union(self, other: "interval"|list[tuple[int, int]]) -> "interval":
         """
         Return the union of intervals
         @other: interval instance
@@ -133,10 +134,9 @@ class interval(object):
 
         if isinstance(other, interval):
             other = other.intervals
-        other = interval(self.intervals + other)
-        return other
+        return interval(self.intervals + other)
 
-    def difference(self, other):
+    def difference(self, other: "interval") -> "interval":
         """
         Return the difference of intervals
         @other: interval instance
@@ -191,13 +191,13 @@ class interval(object):
                     raise ValueError('unknown state', rez)
         return interval(to_test)
 
-    def intersection(self, other):
+    def intersection(self, other: "interval") -> "interval":
         """
         Return the intersection of intervals
         @other: interval instance
         """
 
-        out = []
+        out: list[tuple[int, int]] = []
         for x in self.intervals:
             if x[0] > x[1]:
                 continue

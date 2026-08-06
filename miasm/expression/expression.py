@@ -31,6 +31,7 @@
 
 from builtins import zip
 from builtins import range
+from typing import Any, Callable, Concatenate, Iterable, Iterator, Literal, ParamSpec, TypeGuard, TYPE_CHECKING, TypeVar, cast
 import warnings
 import itertools
 from builtins import int as int_types
@@ -40,6 +41,9 @@ from future.utils import viewitems
 from miasm.core.utils import force_bytes, cmp_elts
 from miasm.core.graph import DiGraph
 from functools import reduce
+
+if TYPE_CHECKING:
+    from miasm.core.locationdb import LocationDB
 
 # Define tokens
 TOK_INF = "<"
@@ -77,7 +81,7 @@ priorities = dict((op, prio)
                   for op in l)
 PRIORITY_MAX = len(priorities_list) - 1
 
-def should_parenthesize_child(child, parent):
+def should_parenthesize_child(child: "Expr", parent: "Expr") -> bool:
     if (isinstance(child, ExprId) or isinstance(child, ExprInt) or
         isinstance(child, ExprCompose) or isinstance(child, ExprMem) or
         isinstance(child, ExprSlice)):
@@ -93,20 +97,20 @@ def should_parenthesize_child(child, parent):
     else:
         return True
 
-def str_protected_child(child, parent):
+def str_protected_child(child: "Expr", parent: "Expr") -> str:
     return ("(%s)" % child) if should_parenthesize_child(child, parent) else str(child)
 
 
 # Expression display
 
 
-class DiGraphExpr(DiGraph):
+class DiGraphExpr(DiGraph["Expr"]):
 
     """Enhanced graph for Expression display
     Expression are displayed as a tree with node and edge labeled
     with only relevant information"""
 
-    def node2str(self, node):
+    def node2str(self, node: "Expr"):
         if isinstance(node, ExprOp):
             return node.op
         elif isinstance(node, ExprId):
@@ -123,7 +127,7 @@ class DiGraphExpr(DiGraph):
             return "[%d:%d]" % (node.start, node.stop)
         return str(node)
 
-    def edge2str(self, nfrom, nto):
+    def edge2str(self, nfrom: "Expr", nto: "Expr"):
         if isinstance(nfrom, ExprCompose):
             for i in nfrom.args:
                 if i[0] == nto:
@@ -138,7 +142,7 @@ class DiGraphExpr(DiGraph):
 
         return ""
 
-def is_expr(expr):
+def is_expr(expr: Any) -> TypeGuard["Expr"]:
     return isinstance(
         expr,
         (
@@ -148,38 +152,42 @@ def is_expr(expr):
         )
     )
 
-def is_associative(expr):
+def is_associative(expr: "ExprOp") -> bool:
     "Return True iff current operation is associative"
     return (expr.op in ['+', '*', '^', '&', '|'])
 
-def is_commutative(expr):
+def is_commutative(expr: "ExprOp") -> bool:
     "Return True iff current operation is commutative"
     return (expr.op in ['+', '*', '^', '&', '|'])
 
-def canonize_to_exprloc(locdb, expr):
+def canonize_to_exprloc(locdb: LocationDB, expr: "Expr") -> "Expr":
     """
     If expr is ExprInt, return ExprLoc with corresponding loc_key
     Else, return expr
 
     @expr: Expr instance
     """
-    if expr.is_int():
+    if is_int(expr):
         loc_key = locdb.get_or_create_offset_location(int(expr))
         ret = ExprLoc(loc_key, expr.size)
         return ret
     return expr
 
-def is_function_call(expr):
+def is_function_call(expr: "Expr") -> TypeGuard["ExprOp"]:
     """Returns true if the considered Expr is a function call
     """
-    return expr.is_op() and expr.op.startswith('call')
+    return is_op(expr) and expr.op.startswith('call')
 
 @total_ordering
 class LocKey(object):
-    def __init__(self, key):
+    _key: int
+
+    def __init__(self, key: int):
         self._key = key
 
-    key = property(lambda self: self._key)
+    @property
+    def key(self) -> int:
+        return self._key
 
     def __hash__(self):
         return hash(self._key)
@@ -204,27 +212,28 @@ class LocKey(object):
     def __str__(self):
         return "loc_key_%d" % self.key
 
-
-class ExprWalkBase(object):
+P = ParamSpec("P")
+T = TypeVar("T")
+class ExprWalkBase[T](object):
     """
     Walk through sub-expressions, call @callback on them.
     If @callback returns a non None value, stop walk and return this value
     """
 
-    def __init__(self, callback):
+    def __init__(self, callback: Callable[Concatenate["Expr", P], T|None]):
         self.callback = callback
 
-    def visit(self, expr, *args, **kwargs):
-        if expr.is_int() or expr.is_id() or expr.is_loc():
+    def visit(self, expr: "Expr", *args, **kwargs) -> T|None:
+        if is_int(expr) or is_id(expr) or is_loc(expr):
             pass
-        elif expr.is_assign():
+        elif is_assign(expr):
             ret = self.visit(expr.dst, *args, **kwargs)
             if ret:
                 return ret
             src = self.visit(expr.src, *args, **kwargs)
             if ret:
                 return ret
-        elif expr.is_cond():
+        elif is_cond(expr):
             ret = self.visit(expr.cond, *args, **kwargs)
             if ret:
                 return ret
@@ -234,20 +243,20 @@ class ExprWalkBase(object):
             ret = self.visit(expr.src2, *args, **kwargs)
             if ret:
                 return ret
-        elif expr.is_mem():
+        elif is_mem(expr):
             ret = self.visit(expr.ptr, *args, **kwargs)
             if ret:
                 return ret
-        elif expr.is_slice():
+        elif is_slice(expr):
             ret = self.visit(expr.arg, *args, **kwargs)
             if ret:
                 return ret
-        elif expr.is_op():
+        elif is_op(expr):
             for arg in expr.args:
                 ret = self.visit(arg, *args, **kwargs)
                 if ret:
                     return ret
-        elif expr.is_compose():
+        elif is_compose(expr):
             for arg in expr.args:
                 ret = self.visit(arg, *args, **kwargs)
                 if ret:
@@ -259,17 +268,17 @@ class ExprWalkBase(object):
         return ret
 
 
-class ExprWalk(ExprWalkBase):
+class ExprWalk(ExprWalkBase["Expr"]):
     """
     Walk through sub-expressions, call @callback on them.
     If @callback returns a non None value, stop walk and return this value
     Use cache mechanism.
     """
-    def __init__(self, callback):
-        self.cache = set()
+    def __init__(self, callback: Callable[Concatenate["Expr", P], "Expr|None"]):
+        self.cache: set["Expr"] = set()
         self.callback = callback
 
-    def visit(self, expr, *args, **kwargs):
+    def visit(self, expr: "Expr", *args, **kwargs) -> "Expr|None":
         if expr in self.cache:
             return None
         ret = super(ExprWalk, self).visit(expr, *args, **kwargs)
@@ -279,7 +288,7 @@ class ExprWalk(ExprWalkBase):
         return None
 
 
-class ExprGetR(ExprWalkBase):
+class ExprGetR(ExprWalkBase["Expr"]):
     """
     Return ExprId/ExprMem used by a given expression
     """
@@ -287,10 +296,10 @@ class ExprGetR(ExprWalkBase):
         super(ExprGetR, self).__init__(lambda x:None)
         self.mem_read = mem_read
         self.cst_read = cst_read
-        self.elements = set()
-        self.cache = dict()
+        self.elements: set["Expr"] = set()
+        self.cache: dict[tuple["Expr", bool, bool], "Expr|None"] = dict()
 
-    def get_r_leaves(self, expr):
+    def get_r_leaves(self, expr: "Expr"):
         if (expr.is_int() or expr.is_loc()) and self.cst_read:
             self.elements.add(expr)
         elif expr.is_mem():
@@ -298,7 +307,7 @@ class ExprGetR(ExprWalkBase):
         elif expr.is_id():
             self.elements.add(expr)
 
-    def visit(self, expr, *args, **kwargs):
+    def visit(self, expr: "Expr", *args, **kwargs):
         cache_key = (expr, self.mem_read, self.cst_read)
         if cache_key in self.cache:
             return self.cache[cache_key]
@@ -306,13 +315,13 @@ class ExprGetR(ExprWalkBase):
         self.cache[cache_key] = ret
         return ret
 
-    def visit_inner(self, expr, *args, **kwargs):
+    def visit_inner(self, expr: "Expr", *args, **kwargs):
         self.get_r_leaves(expr)
         if expr.is_mem() and not self.mem_read:
             # Don't visit memory sons
             return None
 
-        if expr.is_assign():
+        if is_assign(expr):
             if expr.dst.is_mem() and self.mem_read:
                 ret = super(ExprGetR, self).visit(expr.dst, *args, **kwargs)
             if expr.src.is_mem():
@@ -330,28 +339,28 @@ class ExprVisitorBase(object):
     """
     Rebuild expression by visiting sub-expressions
     """
-    def visit(self, expr, *args, **kwargs):
-        if expr.is_int() or expr.is_id() or expr.is_loc():
+    def visit(self, expr: "Expr", *args, **kwargs) -> "Expr":
+        if is_int(expr) or is_id(expr) or is_loc(expr):
             ret = expr
-        elif expr.is_assign():
+        elif is_assign(expr):
             dst = self.visit(expr.dst, *args, **kwargs)
             src = self.visit(expr.src, *args, **kwargs)
             ret = ExprAssign(dst, src)
-        elif expr.is_cond():
+        elif is_cond(expr):
             cond = self.visit(expr.cond, *args, **kwargs)
             src1 = self.visit(expr.src1, *args, **kwargs)
             src2 = self.visit(expr.src2, *args, **kwargs)
             ret = ExprCond(cond, src1, src2)
-        elif expr.is_mem():
+        elif is_mem(expr):
             ptr = self.visit(expr.ptr, *args, **kwargs)
             ret = ExprMem(ptr, expr.size)
-        elif expr.is_slice():
+        elif is_slice(expr):
             arg = self.visit(expr.arg, *args, **kwargs)
             ret = ExprSlice(arg, expr.start, expr.stop)
-        elif expr.is_op():
+        elif is_op(expr):
             args = [self.visit(arg, *args, **kwargs) for arg in expr.args]
             ret = ExprOp(expr.op, *args)
-        elif expr.is_compose():
+        elif is_compose(expr):
             args = [self.visit(arg, *args, **kwargs) for arg in expr.args]
             ret = ExprCompose(*args)
         else:
@@ -366,19 +375,19 @@ class ExprVisitorCallbackTopToBottom(ExprVisitorBase):
     if @callback return non None value, replace current node with this value
     Else, continue visit of sub-expressions
     """
-    def __init__(self, callback):
+    def __init__(self, callback: Callable[["Expr"], "Expr|None"]):
         super(ExprVisitorCallbackTopToBottom, self).__init__()
-        self.cache = dict()
+        self.cache: dict["Expr", "Expr"] = dict()
         self.callback = callback
 
-    def visit(self, expr, *args, **kwargs):
+    def visit(self, expr: "Expr", *args, **kwargs) -> "Expr":
         if expr in self.cache:
             return self.cache[expr]
         ret = self.visit_inner(expr, *args, **kwargs)
         self.cache[expr] = ret
         return ret
 
-    def visit_inner(self, expr, *args, **kwargs):
+    def visit_inner(self, expr: "Expr", *args, **kwargs) -> "Expr":
         ret = self.callback(expr)
         if ret:
             return ret
@@ -391,19 +400,19 @@ class ExprVisitorCallbackBottomToTop(ExprVisitorBase):
     Rebuild expression by visiting sub-expressions
     Call @callback from leaves to root expressions
     """
-    def __init__(self, callback):
+    def __init__(self, callback: Callable[["Expr"], "Expr"]):
         super(ExprVisitorCallbackBottomToTop, self).__init__()
-        self.cache = dict()
+        self.cache: dict["Expr", "Expr"] = dict()
         self.callback = callback
 
-    def visit(self, expr, *args, **kwargs):
+    def visit(self, expr: "Expr", *args, **kwargs) -> "Expr":
         if expr in self.cache:
             return self.cache[expr]
         ret = self.visit_inner(expr, *args, **kwargs)
         self.cache[expr] = ret
         return ret
 
-    def visit_inner(self, expr, *args, **kwargs):
+    def visit_inner(self, expr: "Expr", *args, **kwargs) -> "Expr":
         ret = super(ExprVisitorCallbackBottomToTop, self).visit(expr, *args, **kwargs)
         ret = self.callback(ret)
         return ret
@@ -413,8 +422,8 @@ class ExprVisitorCanonize(ExprVisitorCallbackBottomToTop):
     def __init__(self):
         super(ExprVisitorCanonize, self).__init__(self.canonize)
 
-    def canonize(self, expr):
-        if not expr.is_op():
+    def canonize(self, expr: "Expr") -> "Expr":
+        if not is_op(expr):
             return expr
         if not expr.is_associative():
             return expr
@@ -431,7 +440,7 @@ class ExprVisitorCanonize(ExprVisitorCallbackBottomToTop):
         return new_expr
 
 
-class ExprVisitorContains(ExprWalkBase):
+class ExprVisitorContains(ExprWalkBase[bool]):
     """
     Visitor to test if a needle is in an Expression
     Cache results
@@ -440,12 +449,12 @@ class ExprVisitorContains(ExprWalkBase):
         self.cache = set()
         super(ExprVisitorContains, self).__init__(self.eq_expr)
 
-    def eq_expr(self, expr, needle, *args, **kwargs):
-        if expr == needle:
+    def eq_expr(self, expr: "Expr", *args, **kwargs) -> bool|None:
+        if expr == args[0]:
             return True
         return None
 
-    def visit(self, expr, needle,  *args, **kwargs):
+    def visit(self, expr: "Expr", needle: "Expr",  *args, **kwargs) -> bool|None:
         if (expr, needle) in self.cache:
             return None
         ret = super(ExprVisitorContains, self).visit(expr, needle, *args, **kwargs)
@@ -455,13 +464,40 @@ class ExprVisitorContains(ExprWalkBase):
         return None
 
 
-    def contains(self, expr, needle):
+    def contains(self, expr: "Expr", needle: "Expr") -> bool|None:
         return self.visit(expr, needle)
 
 contains_visitor = ExprVisitorContains()
 canonize_visitor = ExprVisitorCanonize()
 
 # IR definitions
+
+def is_int(expr: "Expr", value: int|None = None) -> TypeGuard["ExprInt"]:
+    return expr.is_int(value)
+
+def is_id(expr: "Expr", value: str|None = None) -> TypeGuard["ExprId"]:
+    return expr.is_id(value)
+
+def is_loc(expr: "Expr", loc_key: LocKey|None=None) -> TypeGuard["ExprLoc"]:
+    return expr.is_loc(loc_key)
+
+def is_assign(expr: "Expr") -> TypeGuard["ExprAssign"]:
+    return expr.is_assign()
+
+def is_cond(expr: "Expr") -> TypeGuard["ExprCond"]:
+    return expr.is_cond()
+
+def is_mem(expr: "Expr") -> TypeGuard["ExprMem"]:
+    return expr.is_mem()
+
+def is_op(expr: "Expr", op: str|None=None) -> TypeGuard["ExprOp"]:
+    return expr.is_op(op)
+
+def is_slice(expr: "Expr", start: int|None=None, stop: int|None=None) -> TypeGuard["ExprSlice"]:
+    return expr.is_slice(start, stop)
+
+def is_compose(expr: "Expr") -> TypeGuard["ExprCompose"]:
+    return expr.is_compose()
 
 class Expr(object):
 
@@ -470,13 +506,15 @@ class Expr(object):
     __slots__ = ["_hash", "_repr", "_size"]
 
     args2expr = {}
-    canon_exprs = set()
+    canon_exprs: set["Expr"] = set()
     use_singleton = True
+
+    _size : int
 
     def set_size(self, _):
         raise ValueError('size is not mutable')
 
-    def __init__(self, size):
+    def __init__(self, size: int):
         """Instantiate an Expr with size @size
         @size: int
         """
@@ -487,7 +525,9 @@ class Expr(object):
         self._hash = None
         self._repr = None
 
-    size = property(lambda self: self._size)
+    @property
+    def size(self) -> int:
+        return self._size
 
     @staticmethod
     def get_object(expr_cls, args):
@@ -500,14 +540,14 @@ class Expr(object):
             Expr.args2expr[(expr_cls, args)] = expr
         return expr
 
-    def get_is_canon(self):
+    @property
+    def is_canon(self) -> bool:
         return self in Expr.canon_exprs
 
-    def set_is_canon(self, value):
+    @is_canon.setter
+    def set_is_canon(self, value: "Expr"):
         assert value is True
         Expr.canon_exprs.add(self)
-
-    is_canon = property(get_is_canon, set_is_canon)
 
     # Common operations
 
@@ -525,10 +565,16 @@ class Expr(object):
     def get_size(self):
         raise DeprecationWarning("use X.size instead of X.get_size()")
 
-    def is_function_call(self):
+    def is_function_call(self) -> bool:
         """Returns true if the considered Expr is a function call
         """
         return False
+
+    def _exprrepr(self) -> str:
+        raise ValueError("Abstract method")
+    
+    def _exprhash(self) -> int:
+        raise ValueError("Abstract method")
 
     def __repr__(self):
         if self._repr is None:
@@ -604,14 +650,14 @@ class Expr(object):
     def __invert__(self):
         return ExprOp('^', self, self.mask)
 
-    def copy(self):
+    def copy(self) -> "Expr":
         "Deep copy of the expression"
         return self.visit(lambda x: x)
 
     def __deepcopy__(self, _):
         return self.copy()
 
-    def replace_expr(self, dct):
+    def replace_expr(self, dct: dict["Expr", "Expr"]) -> "Expr":
         """Find and replace sub expression using dct
         @dct: dictionary associating replaced Expr to its new Expr value
         """
@@ -622,15 +668,15 @@ class Expr(object):
         visitor = ExprVisitorCallbackTopToBottom(lambda expr:replace(expr))
         return visitor.visit(self)
 
-    def canonize(self):
+    def canonize(self) -> "Expr":
         "Canonize the Expression"
         return canonize_visitor.visit(self)
 
-    def msb(self):
+    def msb(self) -> "Expr":
         "Return the Most Significant Bit"
         return self[self.size - 1:self.size]
 
-    def zeroExtend(self, size):
+    def zeroExtend(self, size: int) -> "Expr":
         """Zero extend to size
         @size: int
         """
@@ -639,7 +685,7 @@ class Expr(object):
             return self
         return ExprOp('zeroExt_%d' % size, self)
 
-    def signExtend(self, size):
+    def signExtend(self, size: int) -> "Expr":
         """Sign extend to size
         @size: int
         """
@@ -648,7 +694,7 @@ class Expr(object):
             return self
         return ExprOp('signExt_%d' % size, self)
 
-    def graph_recursive(self, graph):
+    def graph_recursive(self, graph: DiGraphExpr) -> None:
         """Recursive method used by graph
         @graph: miasm.core.graph.DiGraph instance
         Update @graph instance to include sons
@@ -670,54 +716,57 @@ class Expr(object):
     def set_mask(self, value):
         raise ValueError('mask is not mutable')
 
-    mask = property(lambda self: ExprInt(-1, self.size))
+    @property
+    def mask(self) -> "ExprInt":
+        return ExprInt(-1, self.size)
 
-    def is_int(self, value=None):
+    def is_int(self, value:int|None=None) -> bool:
         return False
 
-    def is_id(self, name=None):
+    def is_id(self, name:str|None=None) -> bool:
         return False
 
-    def is_loc(self, label=None):
+    def is_loc(self, loc_key:LocKey|None=None) -> bool:
         return False
 
-    def is_aff(self):
+    def is_aff(self) -> bool:
         warnings.warn('DEPRECATION WARNING: use is_assign()')
         return False
 
-    def is_assign(self):
+    def is_assign(self) -> bool:
         return False
 
-    def is_cond(self):
+    def is_cond(self) -> bool:
         return False
 
-    def is_mem(self):
+    def is_mem(self) -> bool:
         return False
 
-    def is_op(self, op=None):
+    def is_op(self, op=None) -> bool:
         return False
 
-    def is_slice(self, start=None, stop=None):
+    def is_slice(self, start=None, stop=None) -> bool:
         return False
 
-    def is_compose(self):
+    def is_compose(self) -> bool:
         return False
 
-    def is_op_segm(self):
+    def is_op_segm(self) -> bool:
         """Returns True if is ExprOp and op == 'segm'"""
         warnings.warn('DEPRECATION WARNING: use is_op_segm(expr)')
         raise RuntimeError("Moved api")
 
-    def is_mem_segm(self):
+    def is_mem_segm(self) -> bool:
         """Returns True if is ExprMem and ptr is_op_segm"""
         warnings.warn('DEPRECATION WARNING: use is_mem_segm(expr)')
         raise RuntimeError("Moved api")
 
-    def __contains__(self, expr):
+    def __contains__(self, expr: "Expr") -> bool:
         ret = contains_visitor.contains(self, expr)
+        assert ret is not None
         return ret
 
-    def visit(self, callback):
+    def visit(self, callback: Callable[["Expr"], "Expr"]) -> "Expr":
         """
         Apply callback to all sub expression of @self
         This function keeps a cache to avoid rerunning @callback on common sub
@@ -728,16 +777,19 @@ class Expr(object):
         visitor = ExprVisitorCallbackBottomToTop(callback)
         return visitor.visit(self)
 
-    def get_r(self, mem_read=False, cst_read=False):
+    def get_r(self, mem_read=False, cst_read=False) -> set["Expr"]:
         visitor = ExprGetR(mem_read, cst_read)
         visitor.visit(self)
         return visitor.elements
 
 
-    def get_w(self, mem_read=False, cst_read=False):
-        if self.is_assign():
+    def get_w(self) -> set["Expr"]:
+        if is_assign(self):
             return set([self.dst])
         return set()
+
+    def depth(self) -> int:
+        raise ValueError("Abstract method")
 
 class ExprInt(Expr):
 
@@ -751,21 +803,24 @@ class ExprInt(Expr):
 
     __slots__ = Expr.__slots__ + ["_arg"]
 
+    _arg: int
 
-    def __init__(self, arg, size):
+    def __init__(self, arg: int, size: int):
         """Create an ExprInt from num/size
         @arg: int/long number
         @size: int size"""
         super(ExprInt, self).__init__(size)
         # Work for ._arg is done in __new__
 
-    arg = property(lambda self: self._arg)
+    @property
+    def arg(self) -> int:
+        return self._arg
 
     def __reduce__(self):
         state = int(self._arg), self._size
         return self.__class__, state
 
-    def __new__(cls, arg, size):
+    def __new__(cls, arg: int, size: int):
         """Create an ExprInt from num/size
         @arg: int/long number
         @size: int size"""
@@ -782,10 +837,7 @@ class ExprInt(Expr):
     def __str__(self):
         return str("0x%X" % self.arg)
 
-    def get_w(self):
-        return set()
-
-    def _exprhash(self):
+    def _exprhash(self) -> int:
         return hash((EXPRINT, self._arg, self._size))
 
     def _exprrepr(self):
@@ -795,10 +847,10 @@ class ExprInt(Expr):
     def copy(self):
         return ExprInt(self._arg, self._size)
 
-    def depth(self):
+    def depth(self) -> int:
         return 1
 
-    def graph_recursive(self, graph):
+    def graph_recursive(self, graph: DiGraphExpr):
         graph.add_node(self)
 
     def __int__(self):
@@ -807,7 +859,7 @@ class ExprInt(Expr):
     def __long__(self):
         return int(self.arg)
 
-    def is_int(self, value=None):
+    def is_int(self, value:int|None=None) -> bool:
         if value is not None and self._arg != value:
             return False
         return True
@@ -825,7 +877,9 @@ class ExprId(Expr):
 
     __slots__ = Expr.__slots__ + ["_name"]
 
-    def __init__(self, name, size=None):
+    _name: str
+
+    def __init__(self, name: str, size:int|None=None):
         """Create an identifier
         @name: str, identifier's name
         @size: int, identifier's size
@@ -833,11 +887,13 @@ class ExprId(Expr):
         if size is None:
             warnings.warn('DEPRECATION WARNING: size is a mandatory argument: use ExprId(name, SIZE)')
             size = 32
-        assert isinstance(name, (str, bytes))
+        assert isinstance(name, str)
         super(ExprId, self).__init__(size)
         self._name = name
 
-    name = property(lambda self: self._name)
+    @property
+    def name(self) -> str:
+        return self._name
 
     def __reduce__(self):
         state = self._name, self._size
@@ -852,7 +908,7 @@ class ExprId(Expr):
     def __str__(self):
         return str(self._name)
 
-    def get_w(self):
+    def get_w(self) -> set[Expr]:
         return set([self])
 
     def _exprhash(self):
@@ -864,13 +920,13 @@ class ExprId(Expr):
     def copy(self):
         return ExprId(self._name, self._size)
 
-    def depth(self):
+    def depth(self) -> int:
         return 1
 
-    def graph_recursive(self, graph):
+    def graph_recursive(self, graph: DiGraphExpr):
         graph.add_node(self)
 
-    def is_id(self, name=None):
+    def is_id(self, name:str|None=None) -> bool:
         if name is not None and self._name != name:
             return False
         return True
@@ -883,7 +939,9 @@ class ExprLoc(Expr):
 
     __slots__ = Expr.__slots__ + ["_loc_key"]
 
-    def __init__(self, loc_key, size):
+    _loc_key: LocKey
+
+    def __init__(self, loc_key: LocKey, size: int):
         """Create an identifier
         @loc_key: int, label loc_key
         @size: int, identifier's size
@@ -892,7 +950,9 @@ class ExprLoc(Expr):
         super(ExprLoc, self).__init__(size)
         self._loc_key = loc_key
 
-    loc_key= property(lambda self: self._loc_key)
+    @property
+    def loc_key(self) -> LocKey:
+        return self._loc_key
 
     def __reduce__(self):
         state = self._loc_key, self._size
@@ -904,7 +964,7 @@ class ExprLoc(Expr):
     def __str__(self):
         return str(self._loc_key)
 
-    def get_w(self):
+    def get_w(self) -> set[Expr]:
         return set()
 
     def _exprhash(self):
@@ -916,13 +976,13 @@ class ExprLoc(Expr):
     def copy(self):
         return ExprLoc(self._loc_key, self._size)
 
-    def depth(self):
+    def depth(self) -> int:
         return 1
 
-    def graph_recursive(self, graph):
+    def graph_recursive(self, graph: DiGraphExpr):
         graph.add_node(self)
 
-    def is_loc(self, loc_key=None):
+    def is_loc(self, loc_key:LocKey|None=None) -> bool:
         if loc_key is not None and self._loc_key != loc_key:
             return False
         return True
@@ -938,7 +998,10 @@ class ExprAssign(Expr):
 
     __slots__ = Expr.__slots__ + ["_dst", "_src"]
 
-    def __init__(self, dst, src):
+    _dst: Expr
+    _src: Expr
+
+    def __init__(self, dst: Expr, src: Expr):
         """Create an ExprAssign for dst <- src
         @dst: Expr, assignment destination
         @src: Expr, assignment source
@@ -954,18 +1017,23 @@ class ExprAssign(Expr):
 
         super(ExprAssign, self).__init__(self.dst.size)
 
-    dst = property(lambda self: self._dst)
-    src = property(lambda self: self._src)
+    @property
+    def dst(self) -> Expr:
+        return self._dst
+
+    @property
+    def src(self) -> Expr:
+        return self._src
 
 
     def __reduce__(self):
         state = self._dst, self._src
         return self.__class__, state
 
-    def __new__(cls, dst, src):
-        if dst.is_slice() and dst.arg.size == src.size:
+    def __new__(cls, dst: Expr, src: Expr):
+        if is_slice(dst) and dst.arg.size == src.size:
             new_dst, new_src = dst.arg, src
-        elif dst.is_slice():
+        elif is_slice(dst):
             # Complete the source with missing slice parts
             new_dst = dst.arg
             rest = [(ExprSlice(dst.arg, r[0], r[1]), r[0], r[1])
@@ -983,7 +1051,7 @@ class ExprAssign(Expr):
     def __str__(self):
         return "%s = %s" % (str(self._dst), str(self._src))
 
-    def get_w(self):
+    def get_w(self) -> set[Expr]:
         if isinstance(self._dst, ExprMem):
             return set([self._dst])  # [memreg]
         else:
@@ -998,10 +1066,10 @@ class ExprAssign(Expr):
     def copy(self):
         return ExprAssign(self._dst.copy(), self._src.copy())
 
-    def depth(self):
+    def depth(self) -> int:
         return max(self._src.depth(), self._dst.depth()) + 1
 
-    def graph_recursive(self, graph):
+    def graph_recursive(self, graph: DiGraphExpr):
         graph.add_node(self)
         for arg in [self._src, self._dst]:
             arg.graph_recursive(graph)
@@ -1012,7 +1080,7 @@ class ExprAssign(Expr):
         warnings.warn('DEPRECATION WARNING: use is_assign()')
         return True
 
-    def is_assign(self):
+    def is_assign(self) -> bool:
         return True
 
 
@@ -1039,7 +1107,11 @@ class ExprCond(Expr):
 
     __slots__ = Expr.__slots__ + ["_cond", "_src1", "_src2"]
 
-    def __init__(self, cond, src1, src2):
+    _cond: Expr
+    _src1: Expr
+    _src2: Expr
+
+    def __init__(self, cond: Expr, src1: Expr, src2: Expr):
         """Create an ExprCond
         @cond: Expr, condition
         @src1: Expr, value if condition is evaled to not zero
@@ -1055,21 +1127,29 @@ class ExprCond(Expr):
         assert src1.size == src2.size
         super(ExprCond, self).__init__(self.src1.size)
 
-    cond = property(lambda self: self._cond)
-    src1 = property(lambda self: self._src1)
-    src2 = property(lambda self: self._src2)
+    @property
+    def cond(self) -> Expr:
+        return self._cond
+
+    @property
+    def src1(self) -> Expr:
+        return self._src1
+
+    @property
+    def src2(self) -> Expr:
+        return self._src2
 
     def __reduce__(self):
         state = self._cond, self._src1, self._src2
         return self.__class__, state
 
-    def __new__(cls, cond, src1, src2):
+    def __new__(cls, cond: Expr, src1: Expr, src2: Expr):
         return Expr.get_object(cls, (cond, src1, src2))
 
     def __str__(self):
         return "%s?(%s,%s)" % (str_protected_child(self._cond, self), str(self._src1), str(self._src2))
 
-    def get_w(self):
+    def get_w(self) -> set[Expr]:
         return set()
 
     def _exprhash(self):
@@ -1080,23 +1160,23 @@ class ExprCond(Expr):
         return "%s(%r, %r, %r)" % (self.__class__.__name__,
                                    self._cond, self._src1, self._src2)
 
-    def copy(self):
+    def copy(self) -> "ExprCond":
         return ExprCond(self._cond.copy(),
                         self._src1.copy(),
                         self._src2.copy())
 
-    def depth(self):
+    def depth(self) -> int:
         return max(self._cond.depth(),
                    self._src1.depth(),
                    self._src2.depth()) + 1
 
-    def graph_recursive(self, graph):
+    def graph_recursive(self, graph: DiGraphExpr):
         graph.add_node(self)
         for arg in [self._cond, self._src1, self._src2]:
             arg.graph_recursive(graph)
             graph.add_uniq_edge(self, arg)
 
-    def is_cond(self):
+    def is_cond(self) -> bool:
         return True
 
 
@@ -1111,7 +1191,9 @@ class ExprMem(Expr):
 
     __slots__ = Expr.__slots__ + ["_ptr"]
 
-    def __init__(self, ptr, size=None):
+    _ptr: Expr
+
+    def __init__(self, ptr: Expr, size: int|None=None):
         """Create an ExprMem
         @ptr: Expr, memory access address
         @size: int, memory access size
@@ -1137,16 +1219,19 @@ class ExprMem(Expr):
 
     def set_arg(self, value):
         warnings.warn('DEPRECATION WARNING: use exprmem.ptr instead of exprmem.arg')
-        self.ptr = value
+        raise ValueError("Cannot write mem.arg")
 
-    ptr = property(lambda self: self._ptr)
     arg = property(get_arg, set_arg)
+
+    @property
+    def ptr(self) -> Expr:
+        return self._ptr
 
     def __reduce__(self):
         state = self._ptr, self._size
         return self.__class__, state
 
-    def __new__(cls, ptr, size=None):
+    def __new__(cls, ptr: Expr, size: int|None=None):
         if size is None:
             warnings.warn('DEPRECATION WARNING: size is a mandatory argument: use ExprMem(ptr, SIZE)')
             size = 32
@@ -1156,7 +1241,7 @@ class ExprMem(Expr):
     def __str__(self):
         return "@%d[%s]" % (self.size, str(self.ptr))
 
-    def get_w(self):
+    def get_w(self) -> set[Expr]:
         return set([self])  # [memreg]
 
     def _exprhash(self):
@@ -1166,7 +1251,7 @@ class ExprMem(Expr):
         return "%s(%r, %r)" % (self.__class__.__name__,
                                self._ptr, self._size)
 
-    def copy(self):
+    def copy(self) -> "ExprMem":
         ptr = self.ptr.copy()
         return ExprMem(ptr, size=self.size)
 
@@ -1175,15 +1260,15 @@ class ExprMem(Expr):
         warnings.warn('DEPRECATION WARNING: use is_mem_segm(expr)')
         raise RuntimeError("Moved api")
 
-    def depth(self):
+    def depth(self) -> int:
         return self._ptr.depth() + 1
 
-    def graph_recursive(self, graph):
+    def graph_recursive(self, graph: DiGraphExpr):
         graph.add_node(self)
         self._ptr.graph_recursive(graph)
         graph.add_uniq_edge(self, self._ptr)
 
-    def is_mem(self):
+    def is_mem(self) -> bool:
         return True
 
 
@@ -1199,7 +1284,10 @@ class ExprOp(Expr):
 
     __slots__ = Expr.__slots__ + ["_op", "_args"]
 
-    def __init__(self, op, *args):
+    _op: str
+    _args: tuple[Expr, ...]
+
+    def __init__(self, op: str, *args: Expr):
         """Create an ExprOp
         @op: str, operation
         @*args: Expr, operand list
@@ -1269,16 +1357,18 @@ class ExprOp(Expr):
         elif self._op in ['segm']:
             size = self._args[1].size
         else:
-            if None in sizes:
-                size = None
-            else:
-                # All arguments have the same size
-                size = list(sizes)[0]
+            # All arguments have the same size
+            size = list(sizes)[0]
 
         super(ExprOp, self).__init__(size)
 
-    op = property(lambda self: self._op)
-    args = property(lambda self: self._args)
+    @property
+    def op(self) -> str:
+        return self._op
+
+    @property
+    def args(self) -> tuple[Expr, ...]:
+        return self._args
 
     def __reduce__(self):
         state = tuple([self._op] + list(self._args))
@@ -1296,7 +1386,7 @@ class ExprOp(Expr):
         return (self._op + '(' +
                 ', '.join([str(arg) for arg in self._args]) + ')')
 
-    def get_w(self):
+    def get_w(self) -> set[Expr]:
         raise ValueError('op cannot be written!', self)
 
     def _exprhash(self):
@@ -1307,7 +1397,7 @@ class ExprOp(Expr):
         return "%s(%r, %s)" % (self.__class__.__name__, self._op,
                                ', '.join(repr(arg) for arg in self._args))
 
-    def is_function_call(self):
+    def is_function_call(self) -> bool:
         return self._op.startswith('call')
 
     def is_infix(self):
@@ -1329,21 +1419,21 @@ class ExprOp(Expr):
         "Return True iff current operation is commutative"
         return (self._op in ['+', '*', '^', '&', '|'])
 
-    def copy(self):
+    def copy(self) -> "ExprOp":
         args = [arg.copy() for arg in self._args]
         return ExprOp(self._op, *args)
 
-    def depth(self):
+    def depth(self) -> int:
         depth = [arg.depth() for arg in self._args]
         return max(depth) + 1
 
-    def graph_recursive(self, graph):
+    def graph_recursive(self, graph: DiGraphExpr):
         graph.add_node(self)
         for arg in self._args:
             arg.graph_recursive(graph)
             graph.add_uniq_edge(self, arg)
 
-    def is_op(self, op=None):
+    def is_op(self, op: str|None=None):
         if op is None:
             return True
         return self.op == op
@@ -1357,7 +1447,11 @@ class ExprSlice(Expr):
 
     __slots__ = Expr.__slots__ + ["_arg", "_start", "_stop"]
 
-    def __init__(self, arg, start, stop):
+    _arg: Expr
+    _start: int
+    _stop: int
+
+    def __init__(self, arg: Expr, start: int, stop: int):
 
         # arg must be Expr
         assert isinstance(arg, Expr)
@@ -1368,21 +1462,29 @@ class ExprSlice(Expr):
         self._arg, self._start, self._stop = arg, start, stop
         super(ExprSlice, self).__init__(self._stop - self._start)
 
-    arg = property(lambda self: self._arg)
-    start = property(lambda self: self._start)
-    stop = property(lambda self: self._stop)
+    @property
+    def arg(self) -> Expr:
+        return self._arg
+
+    @property
+    def start(self) -> int:
+        return self._start
+
+    @property
+    def stop(self) -> int:
+        return self._stop
 
     def __reduce__(self):
         state = self._arg, self._start, self._stop
         return self.__class__, state
 
-    def __new__(cls, arg, start, stop):
+    def __new__(cls, arg: Expr, start: int, stop: int):
         return Expr.get_object(cls, (arg, start, stop))
 
     def __str__(self):
         return "%s[%d:%d]" % (str_protected_child(self._arg, self), self._start, self._stop)
 
-    def get_w(self):
+    def get_w(self) -> set[Expr]:
         return self._arg.get_w()
 
     def _exprhash(self):
@@ -1392,13 +1494,13 @@ class ExprSlice(Expr):
         return "%s(%r, %d, %d)" % (self.__class__.__name__, self._arg,
                                    self._start, self._stop)
 
-    def copy(self):
+    def copy(self) -> "ExprSlice":
         return ExprSlice(self._arg.copy(), self._start, self._stop)
 
-    def depth(self):
+    def depth(self) -> int:
         return self._arg.depth() + 1
 
-    def slice_rest(self):
+    def slice_rest(self) -> list[tuple[int, int]]:
         "Return the completion of the current slice"
         size = self._arg.size
         if self._start >= size or self._stop > size:
@@ -1408,7 +1510,7 @@ class ExprSlice(Expr):
         if self._start == self._stop:
             return [(0, size)]
 
-        rest = []
+        rest: list[tuple[int, int]] = []
         if self._start != 0:
             rest.append((0, self._start))
         if self._stop < size:
@@ -1416,12 +1518,12 @@ class ExprSlice(Expr):
 
         return rest
 
-    def graph_recursive(self, graph):
+    def graph_recursive(self, graph: DiGraphExpr):
         graph.add_node(self)
         self._arg.graph_recursive(graph)
         graph.add_uniq_edge(self, self._arg)
 
-    def is_slice(self, start=None, stop=None):
+    def is_slice(self, start: int|None=None, stop: int|None=None) -> bool:
         if start is not None and self._start != start:
             return False
         if stop is not None and self._stop != stop:
@@ -1437,7 +1539,9 @@ class ExprCompose(Expr):
 
     __slots__ = Expr.__slots__ + ["_args"]
 
-    def __init__(self, *args):
+    _args: tuple[Expr, ...]
+
+    def __init__(self, *args: Expr):
         """Create an ExprCompose
         The ExprCompose is contiguous and starts at 0
         @args: [Expr, Expr, ...]
@@ -1452,21 +1556,23 @@ class ExprCompose(Expr):
         self._args = args
         super(ExprCompose, self).__init__(sum(arg.size for arg in args))
 
-    args = property(lambda self: self._args)
+    @property
+    def args(self) -> tuple[Expr, ...]:
+        return self._args
 
     def __reduce__(self):
         state = self._args
         return self.__class__, state
 
-    def __new__(cls, *args):
+    def __new__(cls, *args: Expr):
         return Expr.get_object(cls, args)
 
     def __str__(self):
         return '{' + ', '.join(["%s %s %s" % (arg, idx, idx + arg.size) for idx, arg in self.iter_args()]) + '}'
 
-    def get_w(self):
+    def get_w(self) -> set[Expr]:
         return reduce(lambda elements, arg:
-                      elements.union(arg.get_w()), self._args, set())
+                      elements.union(arg.get_w()), self._args, set[Expr]())
 
     def _exprhash(self):
         h_args = [EXPRCOMPOSE] + [hash(arg) for arg in self._args]
@@ -1475,27 +1581,27 @@ class ExprCompose(Expr):
     def _exprrepr(self):
         return "%s%r" % (self.__class__.__name__, self._args)
 
-    def copy(self):
+    def copy(self) -> "ExprCompose":
         args = [arg.copy() for arg in self._args]
         return ExprCompose(*args)
 
-    def depth(self):
+    def depth(self) -> int:
         depth = [arg.depth() for arg in self._args]
         return max(depth) + 1
 
-    def graph_recursive(self, graph):
+    def graph_recursive(self, graph: DiGraphExpr):
         graph.add_node(self)
         for arg in self.args:
             arg.graph_recursive(graph)
             graph.add_uniq_edge(self, arg)
 
-    def iter_args(self):
+    def iter_args(self) -> Iterator[tuple[int, Expr]]:
         index = 0
         for arg in self._args:
             yield index, arg
             index += arg.size
 
-    def is_compose(self):
+    def is_compose(self) -> bool:
         return True
 
 # Expression order for comparison
@@ -1522,8 +1628,7 @@ def compare_exprs_compose(expr1, expr2):
     ret = cmp_elts(expr1[2], expr2[2])
     return ret
 
-
-def compare_expr_list_compose(l1_e, l2_e):
+def compare_expr_list(l1_e: tuple[Expr, ...], l2_e: tuple[Expr, ...]) -> int:
     # Sort by list elements in incremental order, then by list size
     for i in range(min(len(l1_e), len(l2_e))):
         ret = compare_exprs(l1_e[i], l2_e[i])
@@ -1532,16 +1637,7 @@ def compare_expr_list_compose(l1_e, l2_e):
     return cmp_elts(len(l1_e), len(l2_e))
 
 
-def compare_expr_list(l1_e, l2_e):
-    # Sort by list elements in incremental order, then by list size
-    for i in range(min(len(l1_e), len(l2_e))):
-        ret = compare_exprs(l1_e[i], l2_e[i])
-        if ret:
-            return ret
-    return cmp_elts(len(l1_e), len(l2_e))
-
-
-def compare_exprs(expr1, expr2):
+def compare_exprs(expr1: Expr, expr2: Expr) -> int:
     """Compare 2 expressions for canonization
     @expr1: Expr
     @expr2: Expr
@@ -1555,56 +1651,64 @@ def compare_exprs(expr1, expr2):
         return cmp_elts(EXPR_ORDER_DICT[cls1], EXPR_ORDER_DICT[cls2])
     if expr1 == expr2:
         return 0
-    if cls1 == ExprInt:
-        ret = cmp_elts(expr1.size, expr2.size)
+    if isinstance(expr1, ExprInt):
+        int2 = cast(ExprInt, expr2)
+        ret = cmp_elts(expr1.size, int2.size)
         if ret != 0:
             return ret
-        return cmp_elts(expr1.arg, expr2.arg)
-    elif cls1 == ExprId:
+        return cmp_elts(expr1.arg, int2.arg)
+    elif isinstance(expr1, ExprId):
+        id2 = cast(ExprId, expr2)
         name1 = force_bytes(expr1.name)
-        name2 = force_bytes(expr2.name)
+        name2 = force_bytes(id2.name)
         ret = cmp_elts(name1, name2)
         if ret:
             return ret
         return cmp_elts(expr1.size, expr2.size)
-    elif cls1 == ExprLoc:
-        ret = cmp_elts(expr1.loc_key, expr2.loc_key)
+    elif isinstance(expr1, ExprLoc):
+        loc2 = cast(ExprLoc, expr2)
+        ret = cmp_elts(expr1.loc_key, loc2.loc_key)
         if ret:
             return ret
-        return cmp_elts(expr1.size, expr2.size)
+        return cmp_elts(expr1.size, loc2.size)
     elif cls1 == ExprAssign:
         raise NotImplementedError(
             "Comparison from an ExprAssign not yet implemented"
         )
-    elif cls2 == ExprCond:
-        ret = compare_exprs(expr1.cond, expr2.cond)
+    elif isinstance(expr1, ExprCond):
+        cond2 = cast(ExprCond, expr2)
+        ret = compare_exprs(expr1.cond, cond2.cond)
         if ret:
             return ret
-        ret = compare_exprs(expr1.src1, expr2.src1)
+        ret = compare_exprs(expr1.src1, cond2.src1)
         if ret:
             return ret
-        ret = compare_exprs(expr1.src2, expr2.src2)
+        ret = compare_exprs(expr1.src2, cond2.src2)
         return ret
-    elif cls1 == ExprMem:
-        ret = compare_exprs(expr1.ptr, expr2.ptr)
+    elif isinstance(expr1, ExprMem):
+        mem2 = cast(ExprMem, expr2)
+        ret = compare_exprs(expr1.ptr, mem2.ptr)
         if ret:
             return ret
-        return cmp_elts(expr1.size, expr2.size)
-    elif cls1 == ExprOp:
-        if expr1.op != expr2.op:
-            return cmp_elts(expr1.op, expr2.op)
-        return compare_expr_list(expr1.args, expr2.args)
-    elif cls1 == ExprSlice:
-        ret = compare_exprs(expr1.arg, expr2.arg)
+        return cmp_elts(expr1.size, mem2.size)
+    elif isinstance(expr1, ExprOp):
+        op2 = cast(ExprOp, expr2)
+        if expr1.op != op2.op:
+            return cmp_elts(expr1.op, op2.op)
+        return compare_expr_list(expr1.args, op2.args)
+    elif isinstance(expr1, ExprSlice):
+        slice2 = cast(ExprSlice, expr2)
+        ret = compare_exprs(expr1.arg, slice2.arg)
         if ret:
             return ret
-        ret = cmp_elts(expr1.start, expr2.start)
+        ret = cmp_elts(expr1.start, slice2.start)
         if ret:
             return ret
-        ret = cmp_elts(expr1.stop, expr2.stop)
+        ret = cmp_elts(expr1.stop, slice2.stop)
         return ret
-    elif cls1 == ExprCompose:
-        return compare_expr_list_compose(expr1.args, expr2.args)
+    elif isinstance(expr1, ExprCompose):
+        compose2 = cast(ExprCompose, expr2)
+        return compare_expr_list(expr1.args, compose2.args)
     raise NotImplementedError(
         "Comparison between %r %r not implemented" % (expr1, expr2)
     )
@@ -1657,39 +1761,39 @@ def ExprInt_from(expr, i):
     return ExprInt(i, expr.size)
 
 
-def get_expr_ids_visit(expr, ids):
+def get_expr_ids_visit(expr: Expr, ids: set[ExprId]) -> Expr:
     """Visitor to retrieve ExprId in @expr
     @expr: Expr"""
-    if expr.is_id():
+    if is_id(expr):
         ids.add(expr)
     return expr
 
 
-def get_expr_locs_visit(expr, locs):
+def get_expr_locs_visit(expr: Expr, locs: set[ExprLoc]) -> Expr:
     """Visitor to retrieve ExprLoc in @expr
     @expr: Expr"""
-    if expr.is_loc():
+    if is_loc(expr):
         locs.add(expr)
     return expr
 
 
-def get_expr_ids(expr):
+def get_expr_ids(expr: Expr) -> set[ExprId]:
     """Retrieve ExprId in @expr
     @expr: Expr"""
-    ids = set()
+    ids = set[ExprId]()
     expr.visit(lambda x: get_expr_ids_visit(x, ids))
     return ids
 
 
-def get_expr_locs(expr):
+def get_expr_locs(expr: Expr) -> set[ExprLoc]:
     """Retrieve ExprLoc in @expr
     @expr: Expr"""
-    locs = set()
+    locs = set[ExprLoc]()
     expr.visit(lambda x: get_expr_locs_visit(x, locs))
     return locs
 
 
-def test_set(expr, pattern, tks, result):
+def test_set(expr: Expr, pattern: Expr, tks: list[ExprId], result: dict[ExprId, Expr]) -> dict[ExprId, Expr]|bool:
     """Test if v can correspond to e. If so, update the context in result.
     Otherwise, return False
     @expr : Expr to match
@@ -1700,13 +1804,14 @@ def test_set(expr, pattern, tks, result):
 
     if not pattern in tks:
         return expr == pattern
+    assert isinstance(pattern, ExprId)
     if pattern in result and result[pattern] != expr:
         return False
     result[pattern] = expr
     return result
 
 
-def match_expr(expr, pattern, tks, result=None):
+def match_expr(expr: Expr, pattern: Expr, tks: list[ExprId], result: dict[ExprId, Expr]|None=None) -> dict[ExprId, Expr]|Literal[False]:
     """Try to match the @pattern expression with the pattern @expr with @tks jokers.
     Result is output dictionary with matching joker values.
     @expr : Expr pattern
@@ -1731,10 +1836,10 @@ def match_expr(expr, pattern, tks, result=None):
     elif expr.is_loc():
         return test_set(expr, pattern, tks, result)
 
-    elif expr.is_op():
+    elif is_op(expr):
 
         # expr need to be the same operation than pattern
-        if not pattern.is_op():
+        if not is_op(pattern):
             return False
         if expr.op != pattern.op:
             return False
@@ -1768,22 +1873,22 @@ def match_expr(expr, pattern, tks, result=None):
 
     # Recursive tests
 
-    elif expr.is_mem():
-        if not pattern.is_mem():
+    elif is_mem(expr):
+        if not is_mem(pattern):
             return False
         if expr.size != pattern.size:
             return False
         return match_expr(expr.ptr, pattern.ptr, tks, result)
 
-    elif expr.is_slice():
-        if not pattern.is_slice():
+    elif is_slice(expr):
+        if not is_slice(pattern):
             return False
         if expr.start != pattern.start or expr.stop != pattern.stop:
             return False
         return match_expr(expr.arg, pattern.arg, tks, result)
 
-    elif expr.is_cond():
-        if not pattern.is_cond():
+    elif is_cond(expr):
+        if not is_cond(pattern):
             return False
         if match_expr(expr.cond, pattern.cond, tks, result) is False:
             return False
@@ -1793,16 +1898,16 @@ def match_expr(expr, pattern, tks, result=None):
             return False
         return result
 
-    elif expr.is_compose():
-        if not pattern.is_compose():
+    elif is_compose(expr):
+        if not is_compose(pattern):
             return False
         for sub_expr, sub_pattern in zip(expr.args, pattern.args):
             if  match_expr(sub_expr, sub_pattern, tks, result) is False:
                 return False
         return result
 
-    elif expr.is_assign():
-        if not pattern.is_assign():
+    elif is_assign(expr):
+        if not is_assign(pattern):
             return False
         if match_expr(expr.src, pattern.src, tks, result) is False:
             return False
@@ -1819,9 +1924,9 @@ def MatchExpr(expr, pattern, tks, result=None):
     return match_expr(expr, pattern, tks, result)
 
 
-def get_rw(exprs):
-    o_r = set()
-    o_w = set()
+def get_rw(exprs: Iterable[Expr]) -> tuple[set[Expr], set[Expr]]:
+    o_r = set[Expr]()
+    o_w = set[Expr]()
     for expr in exprs:
         o_r.update(expr.get_r(mem_read=True))
     for expr in exprs:
@@ -1829,24 +1934,24 @@ def get_rw(exprs):
     return o_r, o_w
 
 
-def get_list_rw(exprs, mem_read=False, cst_read=True):
+def get_list_rw(exprs: Iterable[Expr], mem_read=False, cst_read=True) -> list[tuple[set[Expr], set[Expr]]]:
     """Return list of read/write reg/cst/mem for each @exprs
     @exprs: list of expressions
     @mem_read: walk though memory accesses
     @cst_read: retrieve constants
     """
-    list_rw = []
+    list_rw: list[tuple[set[Expr], set[Expr]]] = []
     # cst_num = 0
     for expr in exprs:
-        o_r = set()
-        o_w = set()
+        o_r = set[Expr]()
+        o_w = set[Expr]()
         # get r/w
         o_r.update(expr.get_r(mem_read=mem_read, cst_read=cst_read))
-        if isinstance(expr.dst, ExprMem):
-            o_r.update(expr.dst.arg.get_r(mem_read=mem_read, cst_read=cst_read))
+        if isinstance(expr, ExprAssign) and isinstance(expr.dst, ExprMem):
+            o_r.update(expr.dst.ptr.get_r(mem_read=mem_read, cst_read=cst_read))
         o_w.update(expr.get_w())
         # each cst is indexed
-        o_r_rw = set()
+        o_r_rw = set[Expr]()
         for read in o_r:
             o_r_rw.add(read)
         o_r = o_r_rw
@@ -1855,35 +1960,35 @@ def get_list_rw(exprs, mem_read=False, cst_read=True):
     return list_rw
 
 
-def get_expr_ops(expr):
+def get_expr_ops(expr: Expr) -> set[str]:
     """Retrieve operators of an @expr
     @expr: Expr"""
-    def visit_getops(expr, out=None):
+    def visit_getops(expr: Expr, out: set[str]|None=None):
         if out is None:
             out = set()
         if isinstance(expr, ExprOp):
             out.add(expr.op)
         return expr
-    ops = set()
+    ops = set[str]()
     expr.visit(lambda x: visit_getops(x, ops))
     return ops
 
 
-def get_expr_mem(expr):
+def get_expr_mem(expr: Expr) -> set[ExprMem]:
     """Retrieve memory accesses of an @expr
     @expr: Expr"""
-    def visit_getmem(expr, out=None):
+    def visit_getmem(expr, out: set[ExprMem]|None=None):
         if out is None:
             out = set()
         if isinstance(expr, ExprMem):
             out.add(expr)
         return expr
-    ops = set()
+    ops = set[ExprMem]()
     expr.visit(lambda x: visit_getmem(x, ops))
     return ops
 
 
-def _expr_compute_cf(op1, op2):
+def _expr_compute_cf(op1: Expr, op2: Expr) -> Expr:
     """
     Get carry flag of @op1 - @op2
     Ref: x86 cf flag
@@ -1894,7 +1999,7 @@ def _expr_compute_cf(op1, op2):
     cf = (((op1 ^ op2) ^ res) ^ ((op1 ^ res) & (op1 ^ op2))).msb()
     return cf
 
-def _expr_compute_of(op1, op2):
+def _expr_compute_of(op1: Expr, op2: Expr) -> Expr:
     """
     Get overflow flag of @op1 - @op2
     Ref: x86 of flag
@@ -1905,7 +2010,7 @@ def _expr_compute_of(op1, op2):
     of = (((op1 ^ res) & (op1 ^ op2))).msb()
     return of
 
-def _expr_compute_zf(op1, op2):
+def _expr_compute_zf(op1: Expr, op2: Expr) -> Expr:
     """
     Get zero flag of @op1 - @op2
     @op1: Expression
@@ -1918,7 +2023,7 @@ def _expr_compute_zf(op1, op2):
     return zf
 
 
-def _expr_compute_nf(op1, op2):
+def _expr_compute_nf(op1: Expr, op2: Expr) -> Expr:
     """
     Get negative (or sign) flag of @op1 - @op2
     @op1: Expression
@@ -1929,7 +2034,7 @@ def _expr_compute_nf(op1, op2):
     return nf
 
 
-def expr_is_equal(op1, op2):
+def expr_is_equal(op1: Expr, op2: Expr) -> Expr:
     """
     if op1 == op2:
        Return ExprInt(1, 1)
@@ -1941,7 +2046,7 @@ def expr_is_equal(op1, op2):
     return zf
 
 
-def expr_is_not_equal(op1, op2):
+def expr_is_not_equal(op1: Expr, op2: Expr) -> Expr:
     """
     if op1 != op2:
        Return ExprInt(1, 1)
@@ -1953,7 +2058,7 @@ def expr_is_not_equal(op1, op2):
     return ~zf
 
 
-def expr_is_unsigned_greater(op1, op2):
+def expr_is_unsigned_greater(op1: Expr, op2: Expr) -> Expr:
     """
     UNSIGNED cmp
     if op1 > op2:
@@ -1967,7 +2072,7 @@ def expr_is_unsigned_greater(op1, op2):
     return ~(cf | zf)
 
 
-def expr_is_unsigned_greater_or_equal(op1, op2):
+def expr_is_unsigned_greater_or_equal(op1: Expr, op2: Expr) -> Expr:
     """
     Unsigned cmp
     if op1 >= op2:
@@ -1980,7 +2085,7 @@ def expr_is_unsigned_greater_or_equal(op1, op2):
     return ~cf
 
 
-def expr_is_unsigned_lower(op1, op2):
+def expr_is_unsigned_lower(op1: Expr, op2: Expr) -> Expr:
     """
     Unsigned cmp
     if op1 < op2:
@@ -1993,7 +2098,7 @@ def expr_is_unsigned_lower(op1, op2):
     return cf
 
 
-def expr_is_unsigned_lower_or_equal(op1, op2):
+def expr_is_unsigned_lower_or_equal(op1: Expr, op2: Expr) -> Expr:
     """
     Unsigned cmp
     if op1 <= op2:
@@ -2007,7 +2112,7 @@ def expr_is_unsigned_lower_or_equal(op1, op2):
     return cf | zf
 
 
-def expr_is_signed_greater(op1, op2):
+def expr_is_signed_greater(op1: Expr, op2: Expr) -> Expr:
     """
     Signed cmp
     if op1 > op2:
@@ -2022,7 +2127,7 @@ def expr_is_signed_greater(op1, op2):
     return ~(zf | (nf ^ of))
 
 
-def expr_is_signed_greater_or_equal(op1, op2):
+def expr_is_signed_greater_or_equal(op1: Expr, op2: Expr) -> Expr:
     """
     Signed cmp
     if op1 > op2:
@@ -2036,7 +2141,7 @@ def expr_is_signed_greater_or_equal(op1, op2):
     return ~(nf ^ of)
 
 
-def expr_is_signed_lower(op1, op2):
+def expr_is_signed_lower(op1: Expr, op2: Expr) -> Expr:
     """
     Signed cmp
     if op1 < op2:
@@ -2050,7 +2155,7 @@ def expr_is_signed_lower(op1, op2):
     return nf ^ of
 
 
-def expr_is_signed_lower_or_equal(op1, op2):
+def expr_is_signed_lower_or_equal(op1: Expr, op2: Expr) -> Expr:
     """
     Signed cmp
     if op1 <= op2:
@@ -2080,7 +2185,7 @@ size_to_IEEE754_info = {
     },
 }
 
-def expr_is_NaN(expr):
+def expr_is_NaN(expr: Expr) -> Expr:
     """Return 1 or 0 on 1 bit if expr represent a NaN value according to IEEE754
     """
     info = size_to_IEEE754_info[expr.size]
@@ -2093,7 +2198,7 @@ def expr_is_NaN(expr):
                              ExprInt(0, 1)))
 
 
-def expr_is_infinite(expr):
+def expr_is_infinite(expr: Expr) -> Expr:
     """Return 1 or 0 on 1 bit if expr represent an infinite value according to
     IEEE754
     """
@@ -2107,7 +2212,7 @@ def expr_is_infinite(expr):
                              ExprInt(1, 1)))
 
 
-def expr_is_IEEE754_zero(expr):
+def expr_is_IEEE754_zero(expr: Expr) -> Expr:
     """Return 1 or 0 on 1 bit if expr represent a zero value according to
     IEEE754
     """
@@ -2116,7 +2221,7 @@ def expr_is_IEEE754_zero(expr):
     return ExprCond(expr_no_sign, ExprInt(0, 1), ExprInt(1, 1))
 
 
-def expr_is_IEEE754_denormal(expr):
+def expr_is_IEEE754_denormal(expr: Expr) -> Expr:
     """Return 1 or 0 on 1 bit if expr represent a denormalized value according
     to IEEE754
     """
@@ -2126,7 +2231,7 @@ def expr_is_IEEE754_denormal(expr):
     return ExprCond(exponent, ExprInt(0, 1), ExprInt(1, 1))
 
 
-def expr_is_qNaN(expr):
+def expr_is_qNaN(expr: Expr) -> Expr:
     """Return 1 or 0 on 1 bit if expr represent a qNaN (quiet) value according to
     IEEE754
     """
@@ -2135,7 +2240,7 @@ def expr_is_qNaN(expr):
     return expr_is_NaN(expr) & significand_top
 
 
-def expr_is_sNaN(expr):
+def expr_is_sNaN(expr: Expr) -> Expr:
     """Return 1 or 0 on 1 bit if expr represent a sNaN (signalling) value according
     to IEEE754
     """
@@ -2144,7 +2249,7 @@ def expr_is_sNaN(expr):
     return expr_is_NaN(expr) & ~significand_top
 
 
-def expr_is_float_lower(op1, op2):
+def expr_is_float_lower(op1: Expr, op2: Expr) -> Expr:
     """Return 1 on 1 bit if @op1 < @op2, 0 otherwise.
     [!] Assume @op1 and @op2 are not NaN
     Comparison is the floating point one, defined in IEEE754
@@ -2158,7 +2263,7 @@ def expr_is_float_lower(op1, op2):
                     sign1 ^ (expr_is_unsigned_lower(magn1, magn2)))
 
 
-def expr_is_float_equal(op1, op2):
+def expr_is_float_equal(op1: Expr, op2: Expr) -> Expr:
     """Return 1 on 1 bit if @op1 == @op2, 0 otherwise.
     [!] Assume @op1 and @op2 are not NaN
     Comparison is the floating point one, defined in IEEE754

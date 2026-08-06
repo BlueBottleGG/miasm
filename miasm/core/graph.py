@@ -2,9 +2,15 @@ from collections import defaultdict, namedtuple
 
 from future.utils import viewitems, viewvalues
 import re
+from typing import Any, Callable, Iterator, NamedTuple, Protocol, TypeVar, Generic, Self, overload
 
+T = TypeVar('T')
 
-class DiGraph(object):
+class NodeState[T](NamedTuple):
+    state: int
+    node: T
+
+class DiGraph[T]:
 
     """Implementation of directed graph"""
 
@@ -13,12 +19,12 @@ class DiGraph(object):
                                     ["text", "attr"])
 
     def __init__(self):
-        self._nodes = set()
-        self._edges = []
+        self._nodes: set[T] = set()
+        self._edges: list[tuple[T, T]] = []
         # N -> Nodes N2 with a edge (N -> N2)
-        self._nodes_succ = {}
+        self._nodes_succ: dict[T, list[T]] = {}
         # N -> Nodes N2 with a edge (N2 -> N)
-        self._nodes_pred = {}
+        self._nodes_pred: dict[T, list[T]] = {}
 
         self.escape_chars = re.compile('[' + re.escape('{}[]') + '&|<>' + ']')
 
@@ -37,7 +43,7 @@ class DiGraph(object):
     def edges(self):
         return self._edges
 
-    def merge(self, graph):
+    def merge(self, graph: "DiGraph[T]"):
         """Merge the current graph with @graph
         @graph: DiGraph instance
         """
@@ -46,12 +52,12 @@ class DiGraph(object):
         for edge in graph._edges:
             self.add_edge(*edge)
 
-    def __add__(self, graph):
+    def __add__(self, graph: "DiGraph[T]"):
         """Wrapper on `.merge`"""
         self.merge(graph)
         return self
 
-    def copy(self):
+    def copy(self) -> Self:
         """Copy the current graph instance"""
         graph = self.__class__()
         return graph + self
@@ -66,7 +72,7 @@ class DiGraph(object):
     def __ne__(self, other):
         return not self.__eq__(other)
 
-    def add_node(self, node):
+    def add_node(self, node: T) -> bool:
         """Add the node @node to the graph.
         If the node was already present, return False.
         Otherwise, return True
@@ -78,7 +84,7 @@ class DiGraph(object):
         self._nodes_pred[node] = []
         return True
 
-    def del_node(self, node):
+    def del_node(self, node: T):
         """Delete the @node of the graph; Also delete every edge to/from this
         @node"""
 
@@ -89,7 +95,7 @@ class DiGraph(object):
         for succ in self.successors(node):
             self.del_edge(node, succ)
 
-    def add_edge(self, src, dst):
+    def add_edge(self, src: T, dst: T):
         if not src in self._nodes:
             self.add_node(src)
         if not dst in self._nodes:
@@ -98,57 +104,57 @@ class DiGraph(object):
         self._nodes_succ[src].append(dst)
         self._nodes_pred[dst].append(src)
 
-    def add_uniq_edge(self, src, dst):
+    def add_uniq_edge(self, src: T, dst: T):
         """Add an edge from @src to @dst if it doesn't already exist"""
         if (src not in self._nodes_succ or
                 dst not in self._nodes_succ[src]):
             self.add_edge(src, dst)
 
-    def del_edge(self, src, dst):
+    def del_edge(self, src: T, dst: T):
         self._edges.remove((src, dst))
         self._nodes_succ[src].remove(dst)
         self._nodes_pred[dst].remove(src)
 
-    def discard_edge(self, src, dst):
+    def discard_edge(self, src: T, dst: T):
         """Remove edge between @src and @dst if it exits"""
         if (src, dst) in self._edges:
             self.del_edge(src, dst)
 
-    def predecessors_iter(self, node):
+    def predecessors_iter(self, node: T) -> Iterator[T]:
         if not node in self._nodes_pred:
             return
         for n_pred in self._nodes_pred[node]:
             yield n_pred
 
-    def predecessors(self, node):
+    def predecessors(self, node: T) -> list[T]:
         return [x for x in self.predecessors_iter(node)]
 
-    def successors_iter(self, node):
+    def successors_iter(self, node: T) -> Iterator[T]:
         if not node in self._nodes_succ:
             return
         for n_suc in self._nodes_succ[node]:
             yield n_suc
 
-    def successors(self, node):
+    def successors(self, node: T) -> list[T]:
         return [x for x in self.successors_iter(node)]
 
-    def leaves_iter(self):
+    def leaves_iter(self) -> Iterator[T]:
         for node in self._nodes:
             if not self._nodes_succ[node]:
                 yield node
 
-    def leaves(self):
+    def leaves(self) -> list[T]:
         return [x for x in self.leaves_iter()]
 
-    def heads_iter(self):
+    def heads_iter(self) -> Iterator[T]:
         for node in self._nodes:
             if not self._nodes_pred[node]:
                 yield node
 
-    def heads(self):
+    def heads(self) -> list[T]:
         return [x for x in self.heads_iter()]
 
-    def find_path(self, src, dst, cycles_count=0, done=None):
+    def find_path(self, src: T, dst: T, cycles_count=0, done=None) -> list[list[T]]:
         """
         Searches for paths from @src to @dst
         @src: loc_key of basic block from which it should start
@@ -172,7 +178,7 @@ class DiGraph(object):
                     out.append(path + [dst])
         return out
 
-    def find_path_from_src(self, src, dst, cycles_count=0, done=None):
+    def find_path_from_src(self, src: T, dst: T, cycles_count=0, done=None) -> list[list[T]]:
         """
         This function does the same as function find_path.
         But it searches the paths from src to dst, not vice versa like find_path.
@@ -199,14 +205,14 @@ class DiGraph(object):
                     out.append([src] + path)
         return out
 
-    def nodeid(self, node):
+    def nodeid(self, node: T) -> int:
         """
         Returns uniq id for a @node
         @node: a node of the graph
         """
         return hash(node) & 0xFFFFFFFFFFFFFFFF
 
-    def node2lines(self, node):
+    def node2lines(self, node: T) -> Iterator[DotCellDescription|list[DotCellDescription]]:
         """
         Returns an iterator on cells of the dot @node.
         A DotCellDescription or a list of DotCellDescription are accepted
@@ -214,14 +220,14 @@ class DiGraph(object):
         """
         yield self.DotCellDescription(text=str(node), attr={})
 
-    def node_attr(self, node):
+    def node_attr(self, node: T) -> dict[Any, Any]:
         """
         Returns a dictionary of the @node's attributes
         @node: a node of the graph
         """
         return {}
 
-    def edge_attr(self, src, dst):
+    def edge_attr(self, src: T, dst: T) -> dict[Any, Any]:
         """
         Return a dictionary of attributes for the edge between @src and @dst
         @src: the source node of the edge
@@ -230,7 +236,7 @@ class DiGraph(object):
         return {}
 
     @staticmethod
-    def _fix_chars(token):
+    def _fix_chars(token: re.Match[str]) -> str:
         return "&#%04d;" % ord(token.group())
 
     @staticmethod
@@ -242,10 +248,10 @@ class DiGraph(object):
                            **attr))
         )
 
-    def escape_text(self, text):
+    def escape_text(self, text: str) -> str:
         return self.escape_chars.sub(self._fix_chars, text)
 
-    def dot(self):
+    def dot(self) -> str:
         """Render dot graph with HTML"""
 
         td_attr = {'align': 'left'}
@@ -357,12 +363,12 @@ class DiGraph(object):
 
 
     @staticmethod
-    def _reachable_nodes(head, next_cb):
+    def _reachable_nodes(head: T, next_cb: Callable[[T], Iterator[T]]) -> Iterator[T]:
         """Generic algorithm to compute all nodes reachable from/to node
         @head"""
 
         todo = set([head])
-        reachable = set()
+        reachable: set[T] = set()
         while todo:
             node = todo.pop()
             if node in reachable:
@@ -372,23 +378,23 @@ class DiGraph(object):
             for next_node in next_cb(node):
                 todo.add(next_node)
 
-    def predecessors_stop_node_iter(self, node, head):
+    def predecessors_stop_node_iter(self, node: T, head: T) -> Iterator[T]:
         if node == head:
             return
         for next_node in self.predecessors_iter(node):
             yield next_node
 
-    def reachable_sons(self, head):
+    def reachable_sons(self, head: T) -> Iterator[T]:
         """Compute all nodes reachable from node @head. Each son is an
         immediate successor of an arbitrary, already yielded son of @head"""
         return self._reachable_nodes(head, self.successors_iter)
 
-    def reachable_parents(self, leaf):
+    def reachable_parents(self, leaf: T) -> Iterator[T]:
         """Compute all parents of node @leaf. Each parent is an immediate
         predecessor of an arbitrary, already yielded parent of @leaf"""
         return self._reachable_nodes(leaf, self.predecessors_iter)
 
-    def reachable_parents_stop_node(self, leaf, head):
+    def reachable_parents_stop_node(self, leaf: T, head: T) -> Iterator[T]:
         """Compute all parents of node @leaf. Each parent is an immediate
         predecessor of an arbitrary, already yielded parent of @leaf.
         Do not compute reachables past @head node"""
@@ -401,7 +407,7 @@ class DiGraph(object):
 
 
     @staticmethod
-    def _compute_generic_dominators(head, reachable_cb, prev_cb, next_cb):
+    def _compute_generic_dominators(head: T, reachable_cb: Callable[[T], Iterator[T]], prev_cb: Callable[[T], Iterator[T]], next_cb: Callable[[T], Iterator[T]]) -> dict[T, set[T]]:
         """Generic algorithm to compute either the dominators or postdominators
         of the graph.
         @head: the head/leaf of the graph
@@ -411,7 +417,7 @@ class DiGraph(object):
         """
 
         nodes = set(reachable_cb(head))
-        dominators = {}
+        dominators: dict[T, set[T]] = {}
         for node in nodes:
             dominators[node] = set(nodes)
 
@@ -448,14 +454,14 @@ class DiGraph(object):
                 todo.add(succ)
         return dominators
 
-    def compute_dominators(self, head):
+    def compute_dominators(self, head: T) -> dict[T, set[T]]:
         """Compute the dominators of the graph"""
         return self._compute_generic_dominators(head,
                                                 self.reachable_sons,
                                                 self.predecessors_iter,
                                                 self.successors_iter)
 
-    def compute_postdominators(self, leaf):
+    def compute_postdominators(self, leaf: T) -> dict[T, set[T]]:
         """Compute the postdominators of the graph"""
         return self._compute_generic_dominators(leaf,
                                                 self.reachable_parents,
@@ -465,21 +471,21 @@ class DiGraph(object):
 
 
 
-    def compute_dominator_tree(self, head):
+    def compute_dominator_tree(self, head: T) -> "DiGraph[T]":
         """
         Computes the dominator tree of a graph
         :param head: head of graph
         :return: DiGraph
         """
         idoms = self.compute_immediate_dominators(head)
-        dominator_tree = DiGraph()
+        dominator_tree = DiGraph[T]()
         for node in idoms:
             dominator_tree.add_edge(idoms[node], node)
 
         return dominator_tree
 
     @staticmethod
-    def _walk_generic_dominator(node, gen_dominators, succ_cb):
+    def _walk_generic_dominator(node: T, gen_dominators: dict[T, set[T]], succ_cb: Callable[[T], Iterator[T]]) -> Iterator[T]:
         """Generic algorithm to return an iterator of the ordered list of
         @node's dominators/post_dominator.
 
@@ -527,7 +533,7 @@ class DiGraph(object):
             node_gen_dominators.remove(new_node)
             todo = set([new_node])
 
-    def walk_dominators(self, node, dominators):
+    def walk_dominators(self, node: T, dominators: dict[T, set[T]]) -> Iterator[T]:
         """Return an iterator of the ordered list of @node's dominators
         The function doesn't return the self reference in dominators.
         @node: The start node
@@ -537,7 +543,7 @@ class DiGraph(object):
                                             dominators,
                                             self.predecessors_iter)
 
-    def walk_postdominators(self, node, postdominators):
+    def walk_postdominators(self, node: T, postdominators: dict[T, set[T]]) -> Iterator[T]:
         """Return an iterator of the ordered list of @node's postdominators
         The function doesn't return the self reference in postdominators.
         @node: The start node
@@ -549,10 +555,10 @@ class DiGraph(object):
                                             postdominators,
                                             self.successors_iter)
 
-    def compute_immediate_dominators(self, head):
+    def compute_immediate_dominators(self, head: T) -> dict[T, T]:
         """Compute the immediate dominators of the graph"""
         dominators = self.compute_dominators(head)
-        idoms = {}
+        idoms: dict[T, T] = {}
 
         for node in dominators:
             for predecessor in self.walk_dominators(node, dominators):
@@ -561,10 +567,10 @@ class DiGraph(object):
                     break
         return idoms
 
-    def compute_immediate_postdominators(self,tail):
+    def compute_immediate_postdominators(self, tail: T) -> dict[T, T]:
         """Compute the immediate postdominators of the graph"""
         postdominators = self.compute_postdominators(tail)
-        ipdoms = {}
+        ipdoms: dict[T, T] = {}
 
         for node in postdominators:
             for successor in self.walk_postdominators(node, postdominators):
@@ -573,7 +579,7 @@ class DiGraph(object):
                     break
         return ipdoms
 
-    def compute_dominance_frontier(self, head):
+    def compute_dominance_frontier(self, head: T) -> dict[T, set[T]]:
         """
         Compute the dominance frontier of the graph
 
@@ -582,7 +588,7 @@ class DiGraph(object):
         Software Practice & Experience 4 (2001), p. 9
         """
         idoms = self.compute_immediate_dominators(head)
-        frontier = {}
+        frontier: dict[T, set[T]] = {}
 
         for node in idoms:
             if len(self._nodes_pred[node]) >= 2:
@@ -598,7 +604,7 @@ class DiGraph(object):
                         runner = idoms[runner]
         return frontier
 
-    def _walk_generic_first(self, head, flag, succ_cb):
+    def _walk_generic_first(self, head: T, flag: int, succ_cb: Callable[[T], Iterator[T]]) -> Iterator[T]:
         """
         Generic algorithm to compute breadth or depth first search
         for a node.
@@ -608,7 +614,7 @@ class DiGraph(object):
         :return: next node
         """
         todo = [head]
-        done = set()
+        done: set[T] = set()
 
         while todo:
             node = todo.pop(flag)
@@ -621,29 +627,29 @@ class DiGraph(object):
 
             yield node
 
-    def walk_breadth_first_forward(self, head):
+    def walk_breadth_first_forward(self, head: T) -> Iterator[T]:
         """Performs a breadth first search on the graph from @head"""
         return self._walk_generic_first(head, 0, self.successors_iter)
 
-    def walk_depth_first_forward(self, head):
+    def walk_depth_first_forward(self, head: T) -> Iterator[T]:
         """Performs a depth first search on the graph from @head"""
         return self._walk_generic_first(head, -1, self.successors_iter)
 
-    def walk_breadth_first_backward(self, head):
+    def walk_breadth_first_backward(self, head: T) -> Iterator[T]:
         """Performs a breadth first search on the reversed graph from @head"""
         return self._walk_generic_first(head, 0, self.predecessors_iter)
 
-    def walk_depth_first_backward(self, head):
+    def walk_depth_first_backward(self, head: T) -> Iterator[T]:
         """Performs a depth first search on the reversed graph from @head"""
         return self._walk_generic_first(head, -1, self.predecessors_iter)
 
-    def has_loop(self):
+    def has_loop(self) -> bool:
         """Return True if the graph contains at least a cycle"""
         todo = list(self.nodes())
         # tested nodes
-        done = set()
+        done: set[T] = set()
         # current DFS nodes
-        current = set()
+        current: set[T] = set()
         while todo:
             node = todo.pop()
             if node in done:
@@ -665,7 +671,7 @@ class DiGraph(object):
 
         return False
 
-    def compute_natural_loops(self, head):
+    def compute_natural_loops(self, head: T) -> Iterator[tuple[tuple[T, T], set[T]]]:
         """
         Computes all natural loops in the graph.
 
@@ -679,7 +685,7 @@ class DiGraph(object):
             body = self._compute_natural_loop_body(b, a)
             yield ((a, b), body)
 
-    def compute_back_edges(self, head):
+    def compute_back_edges(self, head: T) -> Iterator[tuple[T, T]]:
         """
         Computes all back edges from a node to a
         dominator in the graph.
@@ -696,7 +702,7 @@ class DiGraph(object):
                     edge = (node, successor)
                     yield edge
 
-    def _compute_natural_loop_body(self, head, leaf):
+    def _compute_natural_loop_body(self, head: T, leaf: T) -> set[T]:
         """
         Computes the body of a natural loop by a depth-first
         search on the reversed control flow graph.
@@ -717,7 +723,8 @@ class DiGraph(object):
                 todo.append(predecessor)
         return done
 
-    def compute_strongly_connected_components(self):
+
+    def compute_strongly_connected_components(self) -> Iterator[set[T]]:
         """
         Partitions the graph into strongly connected components.
 
@@ -732,8 +739,8 @@ class DiGraph(object):
         578507-strongly-connected-components-of-a-directed-graph/
         :return: yield a strongly connected component
         """
-        stack = []
-        boundaries = []
+        stack: list[T] = []
+        boundaries: list[int] = []
         counter = len(self.nodes())
 
         # init index with 0
@@ -741,7 +748,6 @@ class DiGraph(object):
 
         # state machine for worklist algorithm
         VISIT, HANDLE_RECURSION, MERGE = 0, 1, 2
-        NodeState = namedtuple('NodeState', ['state', 'node'])
 
         for node in self.nodes():
             # next node if node was already visited
@@ -749,7 +755,7 @@ class DiGraph(object):
                 continue
 
             todo = [NodeState(VISIT, node)]
-            done = set()
+            done: set[T] = set()
 
             while todo:
                 current = todo.pop()
@@ -783,7 +789,7 @@ class DiGraph(object):
                     if index[current.node] == boundaries[-1]:
                         boundaries.pop()
                         counter += 1
-                        scc = set()
+                        scc: set[T] = set()
 
                         while index[current.node] <= len(stack):
                             popped = stack.pop()
@@ -795,18 +801,18 @@ class DiGraph(object):
                         yield scc
 
 
-    def compute_weakly_connected_components(self):
+    def compute_weakly_connected_components(self) -> list[set[T]]:
         """
         Return the weakly connected components
         """
         remaining = set(self.nodes())
-        components = []
+        components: list[set[T]] = []
         while remaining:
             node = remaining.pop()
-            todo = set()
+            todo: set[T] = set()
             todo.add(node)
-            component = set()
-            done = set()
+            component: set[T] = set()
+            done: set[T] = set()
             while todo:
                 node = todo.pop()
                 if node in done:
@@ -821,7 +827,7 @@ class DiGraph(object):
 
 
 
-    def replace_node(self, node, new_node):
+    def replace_node(self, node: T, new_node: T):
         """
         Replace @node by @new_node
         """
@@ -846,15 +852,15 @@ class DiGraphSimplifier(object):
     """
 
     def __init__(self):
-        self.passes = []
+        self.passes: list[Callable[["DiGraphSimplifier", DiGraph], None]] = []
 
-    def enable_passes(self, passes):
+    def enable_passes(self, passes: list[Callable[["DiGraphSimplifier", DiGraph], None]]):
         """Add @passes to passes to applied
         @passes: sequence of function (DiGraphSimplifier, DiGraph) -> None
         """
         self.passes += passes
 
-    def apply_simp(self, graph):
+    def apply_simp(self, graph: DiGraph[T]):
         """Apply enabled simplifications on graph @graph
         @graph: DiGraph instance
         """
@@ -868,12 +874,12 @@ class DiGraphSimplifier(object):
             graph = new_graph
         return new_graph
 
-    def __call__(self, graph):
+    def __call__(self, graph: DiGraph[T]):
         """Wrapper on 'apply_simp'"""
         return self.apply_simp(graph)
 
 
-class MatchGraphJoker(object):
+class MatchGraphJoker[T](object):
 
     """MatchGraphJoker are joker nodes of MatchGraph, that is to say nodes which
     stand for any node. Restrictions can be added to jokers.
@@ -902,8 +908,8 @@ class MatchGraphJoker(object):
 
     """
 
-    def __init__(self, restrict_in=True, restrict_out=True, filt=None,
-                 name=None):
+    def __init__(self, restrict_in=True, restrict_out=True, filt: Callable[[DiGraph[T], T], bool]|None = None,
+                 name: str|None=None):
         """Instantiate a MatchGraphJoker, with restrictions
         @restrict_in: (optional) if set, the number of predecessors of the
                       matched node must be the same than the joker node in the
@@ -922,7 +928,7 @@ class MatchGraphJoker(object):
         self.restrict_in = restrict_in
         self.restrict_out = restrict_out
 
-    def __rshift__(self, joker):
+    def __rshift__(self, joker: "MatchGraphJoker"):
         """Helper for describing a MatchGraph from @joker
         J1 >> J2 stands for an edge going to J2 from J1
         @joker: MatchGraphJoker instance
@@ -949,7 +955,7 @@ class MatchGraphJoker(object):
                                 "(%s)" % " ".join(info) if info else "")
 
 
-class MatchGraph(DiGraph):
+class MatchGraph[T](DiGraph[MatchGraphJoker[T]]):
 
     """MatchGraph intends to be the counterpart of match_expr, but for DiGraph
 
@@ -964,10 +970,10 @@ class MatchGraph(DiGraph):
     def __init__(self, *args, **kwargs):
         super(MatchGraph, self).__init__(*args, **kwargs)
         # Construction helper
-        self._last_node = None
+        self._last_node: MatchGraphJoker[T]|None = None
 
     # Construction helpers
-    def __rshift__(self, joker):
+    def __rshift__(self, joker: "MatchGraphJoker[T]"):
         """Construction helper, adding @joker to the current graph as a son of
         _last_node
         @joker: MatchGraphJoker instance"""
@@ -998,7 +1004,7 @@ class MatchGraph(DiGraph):
         return self
 
     # Graph matching
-    def _check_node(self, candidate, expected, graph, partial_sol=None):
+    def _check_node(self, candidate: T, expected: MatchGraphJoker[T], graph: DiGraph[T], partial_sol: dict[MatchGraphJoker[T], T]|None=None) -> bool:
         """Check if @candidate can stand for @expected in @graph, given @partial_sol
         @candidate: @graph's node
         @expected: MatchGraphJoker instance
@@ -1044,7 +1050,15 @@ class MatchGraph(DiGraph):
         # All checks OK
         return True
 
-    def _propagate_sol(self, node, partial_sol, graph, todo, propagator):
+
+    class PropergatorProtocol(Protocol):
+        def __call__[N](
+            self,
+            graph: DiGraph[N],
+            node: N,
+        ) -> Iterator[N]: ...
+    
+    def _propagate_sol(self, node: MatchGraphJoker[T], partial_sol: dict[MatchGraphJoker[T], T], graph: DiGraph[T], todo: list[dict[MatchGraphJoker[T], T]], propagator: PropergatorProtocol):
         """
         Try to extend the current @partial_sol by propagating the solution using
         @propagator on @node.
@@ -1066,16 +1080,16 @@ class MatchGraph(DiGraph):
                         todo.append(temp_sol)
 
     @staticmethod
-    def _propagate_successors(graph, node):
+    def _propagate_successors[N](graph: DiGraph[N], node: N) -> Iterator[N]:
         """Propagate through @node successors in @graph"""
         return graph.successors_iter(node)
 
     @staticmethod
-    def _propagate_predecessors(graph, node):
+    def _propagate_predecessors[N](graph: DiGraph[N], node: N) -> Iterator[N]:
         """Propagate through @node predecessors in @graph"""
         return graph.predecessors_iter(node)
 
-    def match(self, graph):
+    def match(self, graph: DiGraph[T]) -> Iterator[dict[MatchGraphJoker[T], T]]:
         """Naive subgraph matching between graph and self.
         Iterator on matching solution, as dictionary MatchGraphJoker -> @graph
         @graph: DiGraph instance
@@ -1084,8 +1098,8 @@ class MatchGraph(DiGraph):
         """
         # Partial solution: nodes corrects, edges between these nodes corrects
         # A partial solution is a dictionary MatchGraphJoker -> @graph's node
-        todo = list()  # Dictionaries containing partial solution
-        done = list()  # Already computed partial solutions
+        todo: list[dict[MatchGraphJoker[T], T]] = list()  # Dictionaries containing partial solution
+        done: list[dict[MatchGraphJoker[T], T]] = list()  # Already computed partial solutions
 
         # Elect first candidates
         to_match = next(iter(self._nodes))
