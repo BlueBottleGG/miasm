@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from miasm.expression.simplifications import ExpressionSimplifier
 
 
-def simp_ext(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_ext(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     if expr.op.startswith('zeroExt_'):
         arg = expr.args[0]
         if expr.size == arg.size:
@@ -30,7 +30,7 @@ def simp_ext(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
     return expr
 
 
-def simp_flags(_: ExpressionSimplifier, expr: ExprOp):
+def simp_flags(_: "ExpressionSimplifier", expr: ExprOp):
     args = expr.args
 
     if expr.is_op("FLAG_EQ"):

@@ -80,7 +80,7 @@ def __match_expr_wrap(e: m2_expr.Expr, to_match: m2_expr.Expr, jok_list: list[m2
 
     return r
 
-def expr_simp_inf_signed(expr_simp: ExpressionSimplifier, e: m2_expr.ExprSlice) -> m2_expr.Expr:
+def expr_simp_inf_signed(expr_simp: "ExpressionSimplifier", e: m2_expr.ExprSlice) -> m2_expr.Expr:
     "((x - y) ^ ((x ^ y) & ((x - y) ^ x))) [31:32] == x <s y"
 
     arg = __check_msb(e)
@@ -103,7 +103,7 @@ def expr_simp_inf_signed(expr_simp: ExpressionSimplifier, e: m2_expr.ExprSlice) 
     else:
         return e
 
-def expr_simp_inf_unsigned_inversed(expr_simp: ExpressionSimplifier, e: m2_expr.ExprSlice) -> m2_expr.Expr:
+def expr_simp_inf_unsigned_inversed(expr_simp: "ExpressionSimplifier", e: m2_expr.ExprSlice) -> m2_expr.Expr:
     "((x - y) ^ ((x ^ y) & ((x - y) ^ x))) ^ x ^ y [31:32] == x <u y"
 
     arg = __check_msb(e)
@@ -127,7 +127,7 @@ def expr_simp_inf_unsigned_inversed(expr_simp: ExpressionSimplifier, e: m2_expr.
     else:
         return e
 
-def expr_simp_inverse(expr_simp: ExpressionSimplifier, e: m2_expr.ExprOp) -> m2_expr.Expr:
+def expr_simp_inverse(expr_simp: "ExpressionSimplifier", e: m2_expr.ExprOp) -> m2_expr.Expr:
     """(x <u y) ^ ((x ^ y) [31:32]) == x <s y,
     (x <s y) ^ ((x ^ y) [31:32]) == x <u y"""
 
@@ -169,7 +169,7 @@ def expr_simp_inverse(expr_simp: ExpressionSimplifier, e: m2_expr.ExprOp) -> m2_
     else:
         return ExprOp_inf_unsigned(r[jok1], r[jok2])
 
-def expr_simp_equal(expr_simp: ExpressionSimplifier, e: m2_expr.ExprCond) -> m2_expr.Expr:
+def expr_simp_equal(expr_simp: "ExpressionSimplifier", e: m2_expr.ExprCond) -> m2_expr.Expr:
     """(x - y)?(0:1) == (x == y)"""
 
     to_match = m2_expr.ExprCond(jok1 + jok2, m2_expr.ExprInt(0, 1), m2_expr.ExprInt(1, 1))

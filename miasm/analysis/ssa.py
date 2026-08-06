@@ -685,7 +685,7 @@ class SSADiGraph(SSA):
             self.expressions[newname] = var
 
 
-def irblock_has_phi(irblock: IRBlock|IRBlockLivenessInfos) -> bool:
+def irblock_has_phi(irblock: "IRBlock|IRBlockLivenessInfos") -> bool:
     """
     Return True if @irblock has Phi assignments
     @irblock: IRBlock instance

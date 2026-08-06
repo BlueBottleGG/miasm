@@ -160,7 +160,7 @@ def is_commutative(expr: "ExprOp") -> bool:
     "Return True iff current operation is commutative"
     return (expr.op in ['+', '*', '^', '&', '|'])
 
-def canonize_to_exprloc(locdb: LocationDB, expr: "Expr") -> "Expr":
+def canonize_to_exprloc(locdb: "LocationDB", expr: "Expr") -> "Expr":
     """
     If expr is ExprInt, return ExprLoc with corresponding loc_key
     Else, return expr
@@ -214,7 +214,7 @@ class LocKey(object):
 
 P = ParamSpec("P")
 T = TypeVar("T")
-class ExprWalkBase[T](object):
+class ExprWalkBase[T]():
     """
     Walk through sub-expressions, call @callback on them.
     If @callback returns a non None value, stop walk and return this value

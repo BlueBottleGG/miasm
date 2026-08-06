@@ -879,7 +879,7 @@ class DiGraphSimplifier(object):
         return self.apply_simp(graph)
 
 
-class MatchGraphJoker[T](object):
+class MatchGraphJoker[T]():
 
     """MatchGraphJoker are joker nodes of MatchGraph, that is to say nodes which
     stand for any node. Restrictions can be added to jokers.

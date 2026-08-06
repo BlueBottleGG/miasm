@@ -38,7 +38,7 @@ class interval(object):
 
     Offers common methods to work with interval"""
     intervals: list[tuple[int, int]]
-    def __init__(self, bounds:"interval"|list[tuple[int, int]]|None=None):
+    def __init__(self, bounds:"interval|list[tuple[int, int]]|None"=None):
         """Instance an interval object
         @bounds: (optional) list of (int, int) and/or interval instance
         """
@@ -126,7 +126,7 @@ class interval(object):
     def __ne__(self, other):
         return not self.__eq__(other)
 
-    def union(self, other: "interval"|list[tuple[int, int]]) -> "interval":
+    def union(self, other: "interval|list[tuple[int, int]]") -> "interval":
         """
         Return the union of intervals
         @other: interval instance

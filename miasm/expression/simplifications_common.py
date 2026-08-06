@@ -16,7 +16,7 @@ from miasm.expression.simplifications_explicit import simp_flags
 if TYPE_CHECKING:
     from miasm.expression.simplifications import ExpressionSimplifier
 
-def simp_cst_propagation(e_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_cst_propagation(e_s: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """This passe includes:
      - Constant folding
      - Common logical identities
@@ -400,7 +400,7 @@ def simp_cst_propagation(e_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
     return ExprOp(op_name, *args)
 
 
-def simp_cond_op_int(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_cond_op_int(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     "Extract conditions from operations"
 
 
@@ -431,7 +431,7 @@ def simp_cond_op_int(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
                     ExprOp(expr.op, *args2))
 
 
-def simp_cond_factor(e_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_cond_factor(e_s: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     "Merge similar conditions"
     if not expr.op in ["+", "|", "^", "&", "*", '<<', '>>', 'a>>']:
         return expr
@@ -477,7 +477,7 @@ def simp_cond_factor(e_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
     return new_e
 
 
-def simp_slice(e_s: ExpressionSimplifier, expr: ExprSlice) -> Expr:
+def simp_slice(e_s: "ExpressionSimplifier", expr: ExprSlice) -> Expr:
     "Slice optimization"
 
     # slice(A, 0, a.size) => A
@@ -573,7 +573,7 @@ def simp_slice(e_s: ExpressionSimplifier, expr: ExprSlice) -> Expr:
     return expr
 
 
-def simp_compose(e_s: ExpressionSimplifier, expr: ExprCompose) -> Expr:
+def simp_compose(e_s: "ExpressionSimplifier", expr: ExprCompose) -> Expr:
     "Commons simplification on ExprCompose"
     args = merge_sliceto_slice(expr)
     out = []
@@ -631,7 +631,7 @@ def simp_compose(e_s: ExpressionSimplifier, expr: ExprCompose) -> Expr:
         return ExprCond(cond, arg1, arg2)
     return ExprCompose(*args)
 
-def simp_cond(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
+def simp_cond(_: "ExpressionSimplifier", expr: ExprCond) -> Expr:
     """
     Common simplifications on ExprCond.
     Eval exprcond src1/src2 with satifiable/unsatisfiable condition propagation
@@ -692,7 +692,7 @@ def simp_cond(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
     return expr
 
 
-def simp_mem(_: ExpressionSimplifier, expr: ExprMem) -> Expr:
+def simp_mem(_: "ExpressionSimplifier", expr: ExprMem) -> Expr:
     """
     Common simplifications on ExprMem:
     @32[x?a:b] => x?@32[a]:@32[b]
@@ -730,7 +730,7 @@ def test_cc_eq_args(expr: Expr, *sons_op: str) -> TypeGuard[ExprOp]:
     return len(all_args) == 1
 
 
-def simp_cc_conds(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_cc_conds(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """
     High level simplifications. Example:
     CC_U<(FLAG_SUB_CF(A, B) => A <u B
@@ -950,7 +950,7 @@ def simp_cc_conds(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
 
 
 
-def simp_cond_flag(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
+def simp_cond_flag(_: "ExpressionSimplifier", expr: ExprCond) -> Expr:
     """FLAG_EQ_CMP(X, Y)?A:B => (X == Y)?A:B"""
     cond = expr.cond
     if is_op(cond, "FLAG_EQ_CMP"):
@@ -958,7 +958,7 @@ def simp_cond_flag(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
     return expr
 
 
-def simp_sub_cf_zero(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_sub_cf_zero(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """FLAG_SUB_CF(0, X) => (X)?1:0"""
     if not is_op(expr, "FLAG_SUB_CF"):
         return expr
@@ -966,7 +966,7 @@ def simp_sub_cf_zero(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
         return expr
     return ExprCond(expr.args[1], ExprInt(1, 1), ExprInt(0, 1))
 
-def simp_cond_cc_flag(expr_simp: ExpressionSimplifier, expr: ExprCond) -> Expr:
+def simp_cond_cc_flag(expr_simp: "ExpressionSimplifier", expr: ExprCond) -> Expr:
     """
     ExprCond(CC_><(bit), X, Y) => ExprCond(bit, X, Y)
     ExprCond(CC_U>=(bit), X, Y) => ExprCond(bit, Y, X)
@@ -987,7 +987,7 @@ def simp_cond_cc_flag(expr_simp: ExpressionSimplifier, expr: ExprCond) -> Expr:
         return ExprCond(arg, expr.src2, expr.src1)
     return expr
 
-def simp_cond_sub_cf(expr_simp: ExpressionSimplifier, expr: ExprCond) -> Expr:
+def simp_cond_sub_cf(expr_simp: "ExpressionSimplifier", expr: ExprCond) -> Expr:
     """
     ExprCond(FLAG_SUB_CF(A, B), X, Y) => ExprCond(A <u B, X, Y)
     """
@@ -999,7 +999,7 @@ def simp_cond_sub_cf(expr_simp: ExpressionSimplifier, expr: ExprCond) -> Expr:
     return ExprCond(cond, expr.src1, expr.src2)
 
 
-def simp_cmp_int(expr_simp: ExpressionSimplifier, in_expr: ExprOp) -> Expr:
+def simp_cmp_int(expr_simp: "ExpressionSimplifier", in_expr: ExprOp) -> Expr:
     """
     ({X, 0} == int) => X == int[:]
     X + int1 == int2 => X == int2-int1
@@ -1061,7 +1061,7 @@ def simp_cmp_int(expr_simp: ExpressionSimplifier, in_expr: ExprOp) -> Expr:
 
 
 
-def simp_cmp_int_arg(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
+def simp_cmp_int_arg(_: "ExpressionSimplifier", expr: ExprCond) -> Expr:
     """
     (0x10 <= R0) ? A:B
     =>
@@ -1102,7 +1102,7 @@ def simp_cmp_int_arg(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
 
 
 
-def simp_cmp_bijective_op(expr_simp: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_cmp_bijective_op(expr_simp: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """
     A + B == A => A == 0
 
@@ -1178,7 +1178,7 @@ def simp_cmp_bijective_op(expr_simp: ExpressionSimplifier, expr: ExprOp) -> Expr
     return ExprOp(TOK_EQUAL, arg_a, arg_b)
 
 
-def simp_subwc_cf(_: ExpressionSimplifier, expr: ExprOp) -> Expr :
+def simp_subwc_cf(_: "ExpressionSimplifier", expr: ExprOp) -> Expr :
     """SUBWC_CF(A, B, SUB_CF(C, D)) => SUB_CF({A, C}, {B, D})"""
     if not is_op(expr, 'FLAG_SUBWC_CF'):
         return expr
@@ -1192,7 +1192,7 @@ def simp_subwc_cf(_: ExpressionSimplifier, expr: ExprOp) -> Expr :
     return ExprOp("FLAG_SUB_CF", op1, op2)
 
 
-def simp_subwc_of(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_subwc_of(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """SUBWC_OF(A, B, SUB_CF(C, D)) => SUB_OF({A, C}, {B, D})"""
     if not is_op(expr, 'FLAG_SUBWC_OF'):
         return expr
@@ -1206,7 +1206,7 @@ def simp_subwc_of(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
     return ExprOp("FLAG_SUB_OF", op1, op2)
 
 
-def simp_sign_subwc_cf(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_sign_subwc_cf(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """SIGN_SUBWC(A, B, SUB_CF(C, D)) => SIGN_SUB({A, C}, {B, D})"""
     if not is_op(expr, 'FLAG_SIGN_SUBWC'):
         return expr
@@ -1219,7 +1219,7 @@ def simp_sign_subwc_cf(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
 
     return ExprOp("FLAG_SIGN_SUB", op1, op2)
 
-def simp_double_zeroext(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_double_zeroext(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """A.zeroExt(X).zeroExt(Y) => A.zeroExt(Y)"""
     if not (is_op(expr) and expr.op.startswith("zeroExt")):
         return expr
@@ -1229,7 +1229,7 @@ def simp_double_zeroext(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
     arg2 = arg1.args[0]
     return ExprOp(expr.op, arg2)
 
-def simp_double_signext(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_double_signext(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """A.signExt(X).signExt(Y) => A.signExt(Y)"""
     if not (is_op(expr) and expr.op.startswith("signExt")):
         return expr
@@ -1239,7 +1239,7 @@ def simp_double_signext(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
     arg2 = arg1.args[0]
     return ExprOp(expr.op, arg2)
 
-def simp_zeroext_eq_cst(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_zeroext_eq_cst(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """A.zeroExt(X) == int => A == int[:A.size]"""
     if not is_op(expr, TOK_EQUAL):
         return expr
@@ -1254,7 +1254,7 @@ def simp_zeroext_eq_cst(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
         return ExprInt(0, expr.size)
     return ExprOp(TOK_EQUAL, src, ExprInt(int(arg2), src.size))
 
-def simp_cond_zeroext(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
+def simp_cond_zeroext(_: "ExpressionSimplifier", expr: ExprCond) -> Expr:
     """
     X.zeroExt()?(A:B) => X ? A:B
     X.signExt()?(A:B) => X ? A:B
@@ -1271,7 +1271,7 @@ def simp_cond_zeroext(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
     ret = ExprCond(expr.cond.args[0], expr.src1, expr.src2)
     return ret
 
-def simp_ext_eq_ext(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_ext_eq_ext(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """
     A.zeroExt(X) == B.zeroExt(X) => A == B
     A.signExt(X) == B.signExt(X) => A == B
@@ -1288,7 +1288,7 @@ def simp_ext_eq_ext(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
         return expr
     return ExprOp(TOK_EQUAL, arg1.args[0], arg2.args[0])
 
-def simp_cond_eq_zero(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
+def simp_cond_eq_zero(_: "ExpressionSimplifier", expr: ExprCond) -> Expr:
     """(X == 0)?(A:B) => X?(B:A)"""
     cond = expr.cond
     if not is_op(cond, TOK_EQUAL):
@@ -1299,7 +1299,7 @@ def simp_cond_eq_zero(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
     new_expr = ExprCond(arg1, expr.src2, expr.src1)
     return new_expr
 
-def simp_sign_inf_zeroext(expr_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_sign_inf_zeroext(expr_s: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """
     [!] Ensure before: X.zeroExt(X.size) => X
 
@@ -1345,7 +1345,7 @@ def simp_sign_inf_zeroext(expr_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
     return ExprOp(TOK_INF_EQUAL_UNSIGNED, src, expr_s(arg2[:src.size]))
 
 
-def simp_zeroext_and_cst_eq_cst(expr_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_zeroext_and_cst_eq_cst(expr_s: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """
     A.zeroExt(X) & ... & int == int => A & ... & int[:A.size] == int[:A.size]
     """
@@ -1387,7 +1387,7 @@ def test_one_bit_set(arg: int) -> bool:
     """
     return arg != 0  and ((arg & (arg - 1)) == 0)
 
-def simp_x_and_cst_eq_cst(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
+def simp_x_and_cst_eq_cst(_: "ExpressionSimplifier", expr: ExprCond) -> Expr:
     """
     (x & ... & onebitmask == onebitmask) ? A:B => (x & ... & onebitmask) ? A:B
     """
@@ -1407,7 +1407,7 @@ def simp_x_and_cst_eq_cst(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
     cond = ExprOp('&', *arg1.args)
     return ExprCond(cond, expr.src1, expr.src2)
 
-def simp_cmp_int_int(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_cmp_int_int(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """
     IntA <s IntB => int
     IntA <u IntB => int
@@ -1449,7 +1449,7 @@ def simp_cmp_int_int(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
     return ExprInt(ret, 1)
 
 
-def simp_ext_cst(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_ext_cst(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """
     Int.zeroExt(X) => Int
     Int.signExt(X) => Int
@@ -1468,7 +1468,7 @@ def simp_ext_cst(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
 
 
 
-def simp_ext_cond_int(e_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_ext_cond_int(e_s: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """
     zeroExt(ExprCond(X, Int, Int)) => ExprCond(X, Int, Int)
     """
@@ -1484,7 +1484,7 @@ def simp_ext_cond_int(e_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
     return e_s(ExprCond(arg.cond, src1, src2))
 
 
-def simp_slice_of_ext(_: ExpressionSimplifier, expr: ExprSlice) -> Expr:
+def simp_slice_of_ext(_: "ExpressionSimplifier", expr: ExprSlice) -> Expr:
     """
     C.zeroExt(X)[A:B] => 0 if A >= size(C)
     C.zeroExt(X)[A:B] => C[A:B] if B <= size(C)
@@ -1507,7 +1507,7 @@ def simp_slice_of_ext(_: ExpressionSimplifier, expr: ExprSlice) -> Expr:
         return arg.zeroExtend(expr.stop)
     return expr
 
-def simp_slice_of_sext(e_s: ExpressionSimplifier, expr: ExprSlice) -> Expr:
+def simp_slice_of_sext(e_s: "ExpressionSimplifier", expr: ExprSlice) -> Expr:
     """
     with Y <= size(A)
     A.signExt(X)[0:Y] => A[0:Y]
@@ -1524,7 +1524,7 @@ def simp_slice_of_sext(e_s: ExpressionSimplifier, expr: ExprSlice) -> Expr:
     return expr
 
 
-def simp_slice_of_op_ext(expr_s: ExpressionSimplifier, expr: ExprSlice) -> Expr:
+def simp_slice_of_op_ext(expr_s: "ExpressionSimplifier", expr: ExprSlice) -> Expr:
     """
     (X.zeroExt() + {Z, } + ... + Int)[0:8] => X + ... + int[:]
     (X.zeroExt() | ... | Int)[0:8] => X | ... | int[:]
@@ -1555,7 +1555,7 @@ def simp_slice_of_op_ext(expr_s: ExpressionSimplifier, expr: ExprSlice) -> Expr:
     return ExprOp(src.op, *args)
 
 
-def simp_cond_logic_ext(expr_s: ExpressionSimplifier, expr: ExprCond) -> Expr:
+def simp_cond_logic_ext(expr_s: "ExpressionSimplifier", expr: ExprCond) -> Expr:
     """(X.zeroExt() + ... + Int) ? A:B => X + ... + int[:] ? A:B"""
     cond = expr.cond
     if not is_op(cond):
@@ -1583,7 +1583,7 @@ def simp_cond_logic_ext(expr_s: ExpressionSimplifier, expr: ExprCond) -> Expr:
     return ExprCond(cond, expr.src1, expr.src2)
 
 
-def simp_cond_sign_bit(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
+def simp_cond_sign_bit(_: "ExpressionSimplifier", expr: ExprCond) -> Expr:
     """(a & .. & 0x80000000) ? A:B => (a & ...) <s 0 ? A:B"""
     cond = expr.cond
     if not is_op(cond, '&'):
@@ -1600,7 +1600,7 @@ def simp_cond_sign_bit(_: ExpressionSimplifier, expr: ExprCond) -> Expr:
     return ExprCond(cond, expr.src1, expr.src2)
 
 
-def simp_cond_add(expr_s: ExpressionSimplifier, expr: ExprCond) -> Expr:
+def simp_cond_add(expr_s: "ExpressionSimplifier", expr: ExprCond) -> Expr:
     """
     (a+b)?X:Y => (a == b)?Y:X
     (a^b)?X:Y => (a == b)?Y:X
@@ -1622,7 +1622,7 @@ def simp_cond_add(expr_s: ExpressionSimplifier, expr: ExprCond) -> Expr:
     return ExprCond(new_cond, expr.src2, expr.src1)
 
 
-def simp_cond_eq_1_0(expr_s: ExpressionSimplifier, expr: ExprCond) -> Expr:
+def simp_cond_eq_1_0(expr_s: "ExpressionSimplifier", expr: ExprCond) -> Expr:
     """
     (a == b)?ExprInt(1, 1):ExprInt(0, 1) => a == b
     (a <s b)?ExprInt(1, 1):ExprInt(0, 1) => a == b
@@ -1642,7 +1642,7 @@ def simp_cond_eq_1_0(expr_s: ExpressionSimplifier, expr: ExprCond) -> Expr:
     return cond
 
 
-def simp_cond_inf_eq_unsigned_zero(expr_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_cond_inf_eq_unsigned_zero(expr_s: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """
     (a <=u 0) => a == 0
     """
@@ -1653,7 +1653,7 @@ def simp_cond_inf_eq_unsigned_zero(expr_s: ExpressionSimplifier, expr: ExprOp) -
     return ExprOp(TOK_EQUAL, expr.args[0], expr.args[1])
 
 
-def simp_test_signext_inf(expr_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_test_signext_inf(expr_s: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """A.signExt() <s int => A <s int[:]"""
     if not (is_op(expr, TOK_INF_SIGNED) or is_op(expr, TOK_INF_EQUAL_SIGNED)):
         return expr
@@ -1673,7 +1673,7 @@ def simp_test_signext_inf(expr_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
     return expr
 
 
-def simp_test_zeroext_inf(expr_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_test_zeroext_inf(expr_s: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """A.zeroExt() <u int => A <u int[:]"""
     if not (is_op(expr, TOK_INF_UNSIGNED) or is_op(expr, TOK_INF_EQUAL_UNSIGNED)):
         return expr
@@ -1692,7 +1692,7 @@ def simp_test_zeroext_inf(expr_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
     return expr
 
 
-def simp_add_multiple(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_add_multiple(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """
     X + X => 2 * X
     X + X * int1 => X * (1 + int1)
@@ -1763,7 +1763,7 @@ def simp_add_multiple(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
         return out[0]
     return ExprOp('+', *out)
 
-def simp_compose_and_mask(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_compose_and_mask(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """
     {X 0 8, Y 8 32} & 0xFF => zeroExt(X)
     {X 0 8, Y 8 16, Z 16 32} & 0xFFFF => {X 0 8, Y 8 16, 0x0 16 32}
@@ -1794,7 +1794,7 @@ def simp_compose_and_mask(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
             out.append(arg)
     return expr
 
-def simp_bcdadd_cf(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_bcdadd_cf(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """bcdadd(const, const) => decimal"""
     if not(is_op(expr, 'bcdadd_cf')):
         return expr
@@ -1819,7 +1819,7 @@ def simp_bcdadd_cf(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
             carry = 0
     return ExprInt(carry, 1)
 
-def simp_bcdadd(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_bcdadd(_: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """bcdadd(const, const) => decimal"""
     if not(is_op(expr, 'bcdadd')):
         return expr
@@ -1846,7 +1846,7 @@ def simp_bcdadd(_: ExpressionSimplifier, expr: ExprOp) -> Expr:
     return ExprInt(res, arg1.size)
 
 
-def simp_smod_sext(expr_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_smod_sext(expr_s: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     """
     a.size == b.size
     smod(a.signExtend(X), b.signExtend(X)) => smod(a, b).signExtend(X)
@@ -1879,7 +1879,7 @@ def simp_smod_sext(expr_s: ExpressionSimplifier, expr: ExprOp) -> Expr:
     return expr
 
 # FLAG_SUB_OF(CST1, CST2) => CST
-def simp_flag_cst(expr_simp: ExpressionSimplifier, expr: ExprOp) -> Expr:
+def simp_flag_cst(expr_simp: "ExpressionSimplifier", expr: ExprOp) -> Expr:
     if expr.op not in [
             "FLAG_EQ", "FLAG_EQ_AND", "FLAG_SIGN_SUB", "FLAG_EQ_CMP", "FLAG_ADD_CF",
             "FLAG_SUB_CF", "FLAG_ADD_OF", "FLAG_SUB_OF", "FLAG_EQ_ADDWC", "FLAG_ADDWC_OF",

@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from miasm.expression.simplifications import ExpressionSimplifier
 
 
-def _expr_loc_to_symb(expr: m2_expr.Expr, loc_db: LocationDB|None) -> m2_expr.Expr:
+def _expr_loc_to_symb(expr: m2_expr.Expr, loc_db: "LocationDB|None") -> m2_expr.Expr:
     if not m2_expr.is_loc(expr):
         return expr
     if loc_db is None:
@@ -151,7 +151,7 @@ class TranslatorHtml(Translator):
         return "%s = %s" % tuple(map(expr.from_expr, (expr.dst, expr.src)))
 
 
-def color_expr_html(expr: m2_expr.Expr, loc_db: LocationDB):
+def color_expr_html(expr: m2_expr.Expr, loc_db: "LocationDB"):
     translator = TranslatorHtml(loc_db=loc_db)
     return translator.from_expr(expr)
 
@@ -187,10 +187,11 @@ class AssignBlock(object):
         self._assigns = {} # ExprAssign.dst -> ExprAssign.src
 
         # Concurrent assignments are handled in _set
-        if isinstance(irs, dict):
+        if isinstance(irs, dict) or isinstance(irs, AssignBlock):
             for dst, src in irs.items():
                 self._set(dst, src)
         else:
+            assert not hasattr(irs, "item")
             for expraff in irs:
                 self._set(expraff.dst, expraff.src)
 
@@ -392,7 +393,7 @@ class AssignBlock(object):
             new_assignblk[new_dst] = new_src
         return AssignBlock(irs=new_assignblk, instr=self.instr)
 
-    def to_string(self, loc_db: LocationDB|None=None) -> str:
+    def to_string(self, loc_db: "LocationDB|None"=None) -> str:
         out: list[str] = []
         for dst, src in self.items():
             new_src = src.visit(lambda expr:_expr_loc_to_symb(expr, loc_db))
@@ -414,14 +415,14 @@ class IRBlock(IRBlockBase):
 
     __slots__ = ["_loc_db", "_loc_key", "_assignblks", "_dst", "_dst_linenb"]
 
-    _loc_db: LocationDB
+    _loc_db: "LocationDB"
     _loc_key: m2_expr.LocKey
     _assignblks: tuple[AssignBlock, ...]
     _dst: m2_expr.Expr|None
     _dst_linenb: int|None
 
 
-    def __init__(self, loc_db: LocationDB, loc_key: m2_expr.LocKey, assignblks: Iterable[AssignBlock]):
+    def __init__(self, loc_db: "LocationDB", loc_key: m2_expr.LocKey, assignblks: Iterable[AssignBlock]):
         """
         @loc_key: LocKey of the IR basic block
         @assignblks: list of AssignBlock
@@ -464,7 +465,7 @@ class IRBlock(IRBlockBase):
         return self._loc_key
 
     @property
-    def loc_db(self) -> LocationDB:
+    def loc_db(self) -> "LocationDB":
         return self._loc_db
 
     @property
@@ -572,7 +573,7 @@ class IRBlock(IRBlockBase):
             assignblks.append(AssignBlock(new_assignblk, assignblk.instr))
         return IRBlock(self.loc_db, self.loc_key, assignblks)
 
-    def simplify(self, simplifier: ExpressionSimplifier) -> tuple[bool, "IRBlock"]:
+    def simplify(self, simplifier: "ExpressionSimplifier") -> tuple[bool, "IRBlock"]:
         """
         Simplify expressions in each assignblock
         @simplifier: ExpressionSimplifier instance
@@ -599,7 +600,7 @@ class irbloc(IRBlock):
 
 
 class IRCFGBase[B: IRBlockBase](DiGraph[m2_expr.LocKey]):
-    def __init__(*args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     @property
@@ -611,12 +612,12 @@ class IRCFG(IRCFGBase[IRBlock]):
 
     """DiGraph for IR instances"""
 
-    loc_db: LocationDB
+    loc_db: "LocationDB"
     _blocks: dict[m2_expr.LocKey, IRBlock]
     _irdst: m2_expr.ExprId
     _dot_offset: bool
 
-    def __init__(self, irdst: m2_expr.ExprId, loc_db: LocationDB, blocks: dict[m2_expr.LocKey, IRBlock]|None=None, *args, **kwargs):
+    def __init__(self, irdst: m2_expr.ExprId, loc_db: "LocationDB", blocks: dict[m2_expr.LocKey, IRBlock]|None=None, *args, **kwargs):
         """Instantiate a IRCFG
         @loc_db: LocationDB instance
         @blocks: IR blocks
@@ -655,7 +656,7 @@ class IRCFG(IRCFGBase[IRBlock]):
     def escape_text(self, text: str) -> str:
         return text
 
-    def node2lines(self, node: m2_expr.LocKey) -> Iterator["IRCFG.DotCellDescription"|list["IRCFG.DotCellDescription"]]:
+    def node2lines(self, node: m2_expr.LocKey) -> "Iterator[IRCFG.DotCellDescription|list[IRCFG.DotCellDescription]]":
         node_name = self.loc_db.pretty_str(node)
         yield self.DotCellDescription(
             text="%s" % node_name,
@@ -765,7 +766,7 @@ class IRCFG(IRCFGBase[IRBlock]):
     def simplify(self, simplifier: Callable[[m2_expr.Expr], m2_expr.Expr]) -> bool:
         """
         Simplify expressions in each irblocks
-        @simplifier: ExpressionSimplifier instance
+        @simplifier: "ExpressionSimplifier" instance
         """
         modified = False
         for loc_key, block in list(self.blocks.items()):
@@ -876,7 +877,7 @@ class Lifter(object):
     def instr2ir(self, instr):
         ir_bloc_cur, extra_irblocks = self.get_ir(instr)
         for index, irb in enumerate(extra_irblocks):
-            irs = []
+            irs: list[AssignBlock] = []
             for assignblk in irb:
                 irs.append(AssignBlock(assignblk, instr))
             extra_irblocks[index] = IRBlock(self.loc_db, irb.loc_key, irs)
