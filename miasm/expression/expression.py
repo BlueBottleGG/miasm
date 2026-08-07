@@ -609,7 +609,7 @@ class Expr(object):
         return self in Expr.canon_exprs
 
     @is_canon.setter
-    def set_is_canon(self, value: "Expr"):
+    def is_canon(self, value: bool):
         assert value is True
         Expr.canon_exprs.add(self)
 
@@ -827,8 +827,7 @@ class Expr(object):
 
     def __contains__(self, expr: "Expr") -> bool:
         ret = contains_visitor.contains(self, expr)
-        assert ret is not None
-        return ret
+        return bool(ret)
 
     def visit(self, callback: Callable[["Expr"], "Expr"]) -> "Expr":
         """

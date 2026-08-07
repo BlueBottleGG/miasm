@@ -16,7 +16,7 @@ log_reduce.setLevel(logging.WARNING)
 
 
 
-class ExprNode[T](object):
+class ExprNode[T]:
     """Clone of Expression object with additional information"""
     _expr: Expr
     info: T|None
@@ -204,7 +204,7 @@ class Rule[T](Protocol):
         **kwargs,
     ) -> T|None: ...
 
-class ExprReducer[T](object):
+class ExprReducer[T]:
     """Apply reduction rules to an expr
 
     reduction_rules: list of ordered reduction rules

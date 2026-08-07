@@ -325,6 +325,7 @@ def build_all():
                     ]
                 },
                 install_requires=["future", "pyparsing>=2.4.1"],
+                python_requires=">=3.13",
                 cmdclass={"install_data": smart_install_data},
                 ext_modules = ext_modules,
                 # Metadata
@@ -343,10 +344,8 @@ def build_all():
                     "assembler",
                 ],
                 classifiers=[
-                    "Programming Language :: Python :: 2",
                     "Programming Language :: Python :: 3",
-                    "Programming Language :: Python :: 2.7",
-                    "Programming Language :: Python :: 3.6",
+                    "Programming Language :: Python :: 3.13",
                 ],
                 url = "http://miasm.re",
             )

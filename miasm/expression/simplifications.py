@@ -121,10 +121,28 @@ class ExpressionSimplifier(ExprVisitorCallbackBottomToTop):
 
     # Available passes lists are:
     #  - highlevel: transform high level operators to explicit computations
-    PASS_HIGH_TO_EXPLICIT: list[Simplifier[m2_expr.ExprOp]] = [
+    PASS_HIGH_TO_EXPLICIT_OP: list[Simplifier[m2_expr.ExprOp]] = [
         simplifications_explicit.simp_flags,
         simplifications_explicit.simp_ext,
     ]
+
+    # Backward-compatible public pass maps
+    PASS_COMMONS = {
+        m2_expr.ExprOp: PASS_COMMON_OP,
+        m2_expr.ExprSlice: PASS_COMMON_SLICE,
+        m2_expr.ExprCompose: PASS_COMMON_COMPOSE,
+        m2_expr.ExprCond: PASS_COMMON_COND,
+        m2_expr.ExprMem: PASS_COMMON_MEM,
+    }
+    PASS_HEAVY = {}
+    PASS_COND = {
+        m2_expr.ExprSlice: PASS_COND_SLICE,
+        m2_expr.ExprOp: PASS_COND_OP,
+        m2_expr.ExprCond: PASS_COND_COND,
+    }
+    PASS_HIGH_TO_EXPLICIT = {
+        m2_expr.ExprOp: PASS_HIGH_TO_EXPLICIT_OP,
+    }
 
     expr_simp_cb: dict[Type[m2_expr.Expr], list[ErasedSimplifier]]
 
@@ -132,11 +150,21 @@ class ExpressionSimplifier(ExprVisitorCallbackBottomToTop):
         super(ExpressionSimplifier, self).__init__(self.expr_simp_inner)
         self.expr_simp_cb = {}
 
-    def enable_passes[E: m2_expr.Expr](self, expr_type: type[E], passes: list[Simplifier[E]]):
+    def enable_passes(self, passes: dict):
         """Add passes from @passes
         @passes: dict(Expr class : list(callback))
 
         Callback signature: Expr callback(ExpressionSimplifier, Expr)
+        """
+        for current_type, current_passes in passes.items():
+            self.enable_pass(current_type, current_passes)
+
+    def enable_pass[E: m2_expr.Expr](self, expr_type: type[E], passes: list[Simplifier[E]]):
+        """Add passes from @passes for ExprType @expr_type
+        @expr_type: type[E]
+        @passes: list(callback)
+
+        Callback signature: Expr callback(ExpressionSimplifier, E)
         """
 
         # Clear cache of simplifiied expressions when adding a new pass
@@ -148,9 +176,7 @@ class ExpressionSimplifier(ExprVisitorCallbackBottomToTop):
             cast(ExpressionSimplifier.ErasedSimplifier, rule)
             for rule in passes
         ]
-
-        for _pass in passes:
-            self.expr_simp_cb[expr_type] = fast_unify(self.expr_simp_cb[expr_type] + erased)
+        self.expr_simp_cb[expr_type] = fast_unify(self.expr_simp_cb[expr_type] + erased)
 
     def apply_simp(self, expression: m2_expr.Expr) -> m2_expr.Expr:
         """Apply enabled simplifications on expression
@@ -199,19 +225,19 @@ class ExpressionSimplifier(ExprVisitorCallbackBottomToTop):
         return self.visit(expression)
 
     def enable_common(self):
-        self.enable_passes(m2_expr.ExprOp, self.PASS_COMMON_OP)
-        self.enable_passes(m2_expr.ExprSlice, self.PASS_COMMON_SLICE)
-        self.enable_passes(m2_expr.ExprCompose, self.PASS_COMMON_COMPOSE)
-        self.enable_passes(m2_expr.ExprCond, self.PASS_COMMON_COND)
-        self.enable_passes(m2_expr.ExprMem, self.PASS_COMMON_MEM)
+        self.enable_pass(m2_expr.ExprOp, self.PASS_COMMON_OP)
+        self.enable_pass(m2_expr.ExprSlice, self.PASS_COMMON_SLICE)
+        self.enable_pass(m2_expr.ExprCompose, self.PASS_COMMON_COMPOSE)
+        self.enable_pass(m2_expr.ExprCond, self.PASS_COMMON_COND)
+        self.enable_pass(m2_expr.ExprMem, self.PASS_COMMON_MEM)
 
     def enable_cond(self):
-        self.enable_passes(m2_expr.ExprSlice, self.PASS_COND_SLICE)
-        self.enable_passes(m2_expr.ExprOp, self.PASS_COND_OP)
-        self.enable_passes(m2_expr.ExprCond, self.PASS_COND_COND)
+        self.enable_pass(m2_expr.ExprSlice, self.PASS_COND_SLICE)
+        self.enable_pass(m2_expr.ExprOp, self.PASS_COND_OP)
+        self.enable_pass(m2_expr.ExprCond, self.PASS_COND_COND)
 
     def enable_high_to_explicit(self):
-        expr_simp_high_to_explicit.enable_passes(m2_expr.ExprOp, ExpressionSimplifier.PASS_HIGH_TO_EXPLICIT)
+        self.enable_pass(m2_expr.ExprOp, ExpressionSimplifier.PASS_HIGH_TO_EXPLICIT_OP)
 
 # Public ExprSimplificationPass instance with commons passes
 expr_simp = ExpressionSimplifier()

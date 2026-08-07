@@ -746,9 +746,7 @@ def expr_has_mem(expr: Expr) -> bool:
     def has_mem(self) -> bool:
         return self.is_mem()
     visitor = ExprWalk(has_mem)
-    res = visitor.visit(expr)
-    assert res is not None
-    return res
+    return bool(visitor.visit(expr))
 
 
 def is_stack_access(lifter: Lifter, expr: Expr) -> Literal[False]|ExprMem:

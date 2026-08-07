@@ -456,7 +456,7 @@ class IRBlock(IRBlockBase):
         return not self == other
 
     @property
-    def get_label(self) -> m2_expr.LocKey:
+    def label(self) -> m2_expr.LocKey:
         warnings.warn('DEPRECATION WARNING: use ".loc_key" instead of ".label"')
         return self.loc_key
 
@@ -733,7 +733,7 @@ class IRCFG(IRCFGBase[IRBlock]):
         loc_key = self.get_loc_key(addr)
         if loc_key is not None:
             return loc_key
-        if not isinstance(addr, m2_expr.ExprInt) or not isinstance(addr, int):
+        if not isinstance(addr, (m2_expr.ExprInt, int)):
             return None 
 
         return self.loc_db.add_location(offset=int(addr))

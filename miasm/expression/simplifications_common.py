@@ -329,7 +329,7 @@ def simp_cst_propagation(e_s: "ExpressionSimplifier", expr: ExprOp) -> Expr:
 
     # -(a * b * int) => a * b * (-int)
     if op_name == "-" and is_op(args[0], '*') and is_int(args[0].args[-1]):
-        return ExprOp('*', *(list(args[:-1]) + [ExprInt(-int(args[0].args[-1]), expr.size)]))
+        return ExprOp('*', *(list(args[0].args[:-1]) + [ExprInt(-int(args[0].args[-1]), expr.size)]))
 
     # A << int with A ExprCompose => move index
     if (op_name == "<<" and is_compose(args[0]) and
