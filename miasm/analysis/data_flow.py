@@ -220,14 +220,16 @@ class DeadRemoval(object):
     Do dead removal
     """
 
-    def __init__(self, lifter: Lifter, expr_to_original_expr: dict[Expr, Expr]|None=None):
+    expr_to_original_expr: dict[Expr, Expr]
+
+    def __init__[D: Expr, S: Expr](self, lifter: Lifter, expr_to_original_expr: dict[D, S]|None=None):
         self.lifter = lifter
         if expr_to_original_expr is None:
             expr_to_original_expr = {}
         self.expr_to_original_expr = expr_to_original_expr
 
 
-    def add_expr_to_original_expr(self, expr_to_original_expr: dict[Expr, Expr]):
+    def add_expr_to_original_expr[D: Expr, S: Expr](self, expr_to_original_expr: dict[D, S]):
         self.expr_to_original_expr.update(expr_to_original_expr)
 
     def is_unkillable_destination(self, lval: Expr, rval: Expr) -> bool:
