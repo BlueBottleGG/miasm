@@ -14,34 +14,26 @@
 # You should have received a copy of the GNU General Public License
 # along with Miasm-Docker. If not, see <http://www.gnu.org/licenses/>.
 
-FROM debian:buster
+FROM python:3.13-slim-bookworm
 LABEL maintainer="Camille Mougey <commial@gmail.com>"
 
 # Download needed packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc \
         g++ \
-        python3 \
-        python3-dev \
-        python3-pip \
-        python3-setuptools \
-        python3-wheel \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /root/.cache
 
 WORKDIR /opt/miasm
 
-# Install Requirements
-COPY requirements.txt /opt/miasm/requirements.txt
-RUN pip3 install -r requirements.txt
-COPY optional_requirements.txt /opt/miasm/optional_requirements.txt
-RUN pip3 install -r optional_requirements.txt
-
 # Install miasm
 COPY README.md /opt/miasm/README.md
+COPY LICENSE /opt/miasm/LICENSE
+COPY pyproject.toml /opt/miasm/pyproject.toml
 COPY setup.py /opt/miasm/setup.py
 COPY miasm /opt/miasm/miasm
-RUN pip3 install .
+RUN pip3 install --upgrade pip \
+    && MIASM_REQUIRE_JIT=1 pip3 install --group dev '.[cparser,z3,llvm]'
 
 # Get everything else
 COPY . /opt/miasm
@@ -53,4 +45,4 @@ USER miasm
 
 # Default cmd
 WORKDIR /opt/miasm/test
-CMD ["/bin/bash", "-c", "/usr/bin/python3 test_all.py -m"]
+CMD ["/bin/bash", "-c", "python test_all.py -m"]
