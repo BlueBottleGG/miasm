@@ -1298,6 +1298,7 @@ def update_phi_with_deleted_edges(ircfg: IRCFG, edges_to_del: Iterable[tuple[Loc
         assignblks = list(block)
         assignblk = assignblks[0]
         out: dict[Expr, Expr] = {}
+        non_phi_out: dict[Expr, Expr] = {}
         for dst, phi_sources in viewitems(assignblk):
             if not is_op(phi_sources, 'Phi'):
                 out[dst] = phi_sources
@@ -1316,11 +1317,14 @@ def update_phi_with_deleted_edges(ircfg: IRCFG, edges_to_del: Iterable[tuple[Loc
                     modified = True
             assert to_keep
             if len(to_keep) == 1:
-                out[dst] = to_keep.pop()
+                non_phi_out[dst] = to_keep.pop()
             else:
                 out[dst] = ExprOp('Phi', *to_keep)
         assignblk = AssignBlock(out, assignblks[0].instr)
         assignblks[0] = assignblk
+        if len(non_phi_out) != 0:
+            assignblk = AssignBlock(non_phi_out)
+            assignblks.insert(1, assignblk)
         new_irblock = IRBlock(block.loc_db, loc_dst, assignblks)
         blocks[block.loc_key] = new_irblock
 
