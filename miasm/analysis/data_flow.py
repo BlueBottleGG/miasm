@@ -685,7 +685,7 @@ class SSADefUse(DiGraph[AssignblkNode]):
         dst2src = index2dst.setdefault(node.index, {})
         dst2src[node.var] = src
 
-    def add_def_node(self, def_nodes: dict[ExprId, AssignblkNode], node: AssignblkNode, src):
+    def add_def_node(self, def_nodes: dict[ExprId, AssignblkNode], node: AssignblkNode):
         if is_id(node.var):
             def_nodes[node.var] = node
 
@@ -698,10 +698,10 @@ class SSADefUse(DiGraph[AssignblkNode]):
             if not is_mem(source):
                 use_nodes.setdefault(source, set()).add(node)
 
-    def get_node_target(self, node):
+    def get_node_target(self, node: AssignblkNode):
         return self._links[node.label][node.index][node.var]
 
-    def set_node_target(self, node, src):
+    def set_node_target(self, node: AssignblkNode, src: Expr):
         self._links[node.label][node.index][node.var] = src
 
     @classmethod
@@ -725,7 +725,7 @@ class SSADefUse(DiGraph[AssignblkNode]):
                 for dst, src in assignblk.items():
                     node = AssignblkNode(lbl, index, dst)
                     graph.add_var_def(node, src)
-                    graph.add_def_node(def_nodes, node, src)
+                    graph.add_def_node(def_nodes, node)
                     graph.add_use_node(use_nodes, node, src)
 
         for dst, node in def_nodes.items():
