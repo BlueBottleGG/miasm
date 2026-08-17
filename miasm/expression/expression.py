@@ -1391,6 +1391,7 @@ class ExprOp(Expr):
                     "FLAG_SIGN_ADDWC", "FLAG_SIGN_SUBWC",
                     "FLAG_ADDWC_CF", "FLAG_ADDWC_OF",
                     "FLAG_SUBWC_CF", "FLAG_SUBWC_OF",
+                    "<<", ">>", "a>>"
 
             ]:
                 raise ValueError(
@@ -1441,6 +1442,8 @@ class ExprOp(Expr):
             size = int(self._op[8:])
         elif self._op in ['segm']:
             size = self._args[1].size
+        elif self._op in {"<<", ">>", "a>>"}:
+            size = self._args[0].size
         else:
             # All arguments have the same size
             size = list(sizes)[0]
