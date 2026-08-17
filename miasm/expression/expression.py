@@ -1391,12 +1391,12 @@ class ExprOp(Expr):
                     "FLAG_SIGN_ADDWC", "FLAG_SIGN_SUBWC",
                     "FLAG_ADDWC_CF", "FLAG_ADDWC_OF",
                     "FLAG_SUBWC_CF", "FLAG_SUBWC_OF",
-                    "<<", ">>", "a>>"
+                    "<<", ">>", "a>>", "<<<", ">>>"
 
             ]:
                 raise ValueError(
-                    "sanitycheck: ExprOp args must have same size! %s" %
-                    ([(str(arg), arg.size) for arg in args]))
+                    "sanitycheck: ExprOp args must have same size! %s %s" %
+                    (op, [(str(arg), arg.size) for arg in args]))
 
         if not isinstance(op, str):
             raise ValueError("ExprOp: 'op' argument must be a string")
@@ -1442,7 +1442,7 @@ class ExprOp(Expr):
             size = int(self._op[8:])
         elif self._op in ['segm']:
             size = self._args[1].size
-        elif self._op in {"<<", ">>", "a>>"}:
+        elif self._op in {"<<", ">>", "a>>", "<<<", ">>>"}:
             size = self._args[0].size
         else:
             # All arguments have the same size
