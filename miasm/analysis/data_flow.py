@@ -3,7 +3,7 @@ from builtins import range
 from collections import namedtuple, Counter
 from dataclasses import dataclass
 from pprint import pprint as pp
-from typing import Callable, Collection, Container, Iterable, Iterator, Literal, Self, cast
+from typing import Callable, Collection, Container, Hashable, Iterable, Iterator, Literal, Self, cast
 from future.utils import viewitems, viewvalues
 from miasm.core.bin_stream import bin_stream
 from miasm.core.locationdb import LocationDB
@@ -1671,7 +1671,7 @@ def is_mem_sub_part(needle: ExprMem, mem: ExprMem) -> Literal[False]|int:
         return False
     return ptr_offset_a - ptr_offset_b
 
-class UnionFind(object):
+class UnionFind[T: Hashable]:
     """
     Implementation of UnionFind structure
     __classes: a list of Set of equivalent elements
@@ -1682,9 +1682,9 @@ class UnionFind(object):
     element of an equivalence class
     """
     index: int
-    __classes: list[set[Expr]]
-    node_to_class: dict[Expr, set[Expr]]
-    order: dict[Expr, int]
+    __classes: list[set[T]]
+    node_to_class: dict[T, set[T]]
+    order: dict[T, int]
 
     def __init__(self):
         self.index = 0
@@ -1692,11 +1692,11 @@ class UnionFind(object):
         self.node_to_class = {}
         self.order = dict()
 
-    def copy(self) -> "UnionFind":
+    def copy(self) -> "UnionFind[T]":
         """
         Return a copy of the object
         """
-        unionfind = UnionFind()
+        unionfind = UnionFind[T]()
         unionfind.index = self.index
         unionfind.__classes = [set(known_class) for known_class in self.__classes]
         node_to_class = {}
@@ -1707,10 +1707,11 @@ class UnionFind(object):
         unionfind.order = dict(self.order)
         return unionfind
 
-    def replace_node(self, old_node: Expr, new_node: Expr):
+    def replace_node(self: "UnionFind[Expr]", old_node: Expr, new_node: Expr):
         """
         Replace the @old_node by the @new_node
         """
+        assert isinstance(old_node, Expr) and isinstance(new_node, Expr)
         classes = self.get_classes()
 
         new_classes: list[set[Expr]] = []
@@ -1733,7 +1734,7 @@ class UnionFind(object):
             new_order[new_node] = index
         self.order = new_order
 
-    def get_classes(self) -> list[set[Expr]]:
+    def get_classes(self) -> list[set[T]]:
         """
         Return a list of the equivalent classes
         """
@@ -1742,7 +1743,7 @@ class UnionFind(object):
             classes.append(set(class_tmp))
         return classes
 
-    def nodes(self) -> Iterator[Expr]:
+    def nodes(self) -> Iterator[T]:
         for known_class in self.__classes:
             for node in known_class:
                 yield node
@@ -1767,7 +1768,7 @@ class UnionFind(object):
         out.append('>')
         return "\n".join(out)
 
-    def add_equivalence(self, node_a: Expr, node_b: Expr):
+    def add_equivalence(self, node_a: T, node_b: T):
         """
         Add the new equivalence @node_a == @node_b
         @node_a is equivalent to @node_b, but @node_b is more representative
@@ -1796,7 +1797,7 @@ class UnionFind(object):
         else:
             raise RuntimeError("Two nodes cannot be in two classes")
 
-    def _get_master(self, node: Expr) -> Expr|None:
+    def _get_master(self, node: T) -> T|None:
         if node not in self.node_to_class:
             return None
         known_class = self.node_to_class[node]
@@ -1806,33 +1807,37 @@ class UnionFind(object):
                 best_node = node
         return best_node
 
-    def get_master(self, node: Expr) -> Expr|None:
+    def get_master(self, node: T) -> T|None:
         """
         Return the representative element of the equivalence class containing
         @node
         @node: ExprMem or ExprId
         """
+        if not isinstance(node, Expr):
+            return self._get_master(node)
+
         if not is_mem(node):
             return self._get_master(node)
         if node in self.node_to_class:
             # Full expr mem is known
             return self._get_master(node)
         # Test if mem is sub part of known node
-        for expr in self.node_to_class:
+        this = cast(UnionFind[Expr], self)
+        for expr in this.node_to_class:
             if not is_mem(expr):
                 continue
             ret = is_mem_sub_part(node, expr)
             if ret is False:
                 continue
-            master = self._get_master(expr)
+            master = this._get_master(expr)
             assert master is not None
             master = master[ret * 8 : ret * 8 + node.size]
-            return master
+            return cast(T, master)
 
         return self._get_master(node)
 
 
-    def del_element(self, node: Expr):
+    def del_element(self, node: T):
         """
         Remove @node for the equivalence classes
         """
@@ -1842,7 +1847,7 @@ class UnionFind(object):
         del(self.node_to_class[node])
         del(self.order[node])
 
-    def del_get_new_master(self, node: Expr) -> Expr|None:
+    def del_get_new_master(self, node: T) -> T|None:
         """
         Remove @node for the equivalence classes and return it's representative
         equivalent element
@@ -1906,7 +1911,7 @@ class State(object):
     """
 
     def __init__(self):
-        self.equivalence_classes = UnionFind()
+        self.equivalence_classes = UnionFind[Expr]()
         self.undefined = set[Expr]()
 
     def __str__(self):
@@ -2216,7 +2221,7 @@ class State(object):
             if node in all_nodes
         )
 
-        unionfind = UnionFind()
+        unionfind = UnionFind[Expr]()
         global_max_index = 0
         for common in out:
             min_index = None
