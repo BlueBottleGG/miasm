@@ -1781,21 +1781,28 @@ class UnionFind[T: Hashable]:
         self.order[node_a] = self.index
         self.index += 1
 
-        if node_a not in self.node_to_class and node_b not in self.node_to_class:
+        class_a = self.node_to_class.get(node_a)
+        class_b = self.node_to_class.get(node_b)
+
+        if class_a is None and class_b is None:
             new_class = set([node_a, node_b])
             self.node_to_class[node_a] = new_class
             self.node_to_class[node_b] = new_class
             self.__classes.append(new_class)
-        elif node_a in self.node_to_class and node_b not in self.node_to_class:
-            known_class = self.node_to_class[node_a]
-            known_class.add(node_b)
-            self.node_to_class[node_b] = known_class
-        elif node_a not in self.node_to_class and node_b in self.node_to_class:
-            known_class = self.node_to_class[node_b]
-            known_class.add(node_a)
-            self.node_to_class[node_a] = known_class
-        else:
-            raise RuntimeError("Two nodes cannot be in two classes")
+        elif class_a is not None and class_b is None:
+            class_a.add(node_b)
+            self.node_to_class[node_b] = class_a
+        elif class_a is None and class_b is not None:
+            class_b.add(node_a)
+            self.node_to_class[node_a] = class_b
+        elif class_a is not class_b:
+            assert class_a is not None and class_b is not None
+            if len(class_a) < len(class_b):
+                class_a, class_b = class_b, class_a
+            class_a.update(class_b)
+            for node in class_b:
+                self.node_to_class[node] = class_a
+            self.__classes.remove(class_b)
 
     def _get_master(self, node: T) -> T|None:
         if node not in self.node_to_class:
