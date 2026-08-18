@@ -29,7 +29,7 @@ class LifterModelCallArml(LifterModelCallArmlBase):
                 ExprAssign(
                     self.ret_reg,
                     ExprOp(
-                        'call_func_ret',
+                        f'call_func_ret_{self.ret_reg.size}',
                         ad,
                         self.arch.regs.R0,
                         self.arch.regs.R1,

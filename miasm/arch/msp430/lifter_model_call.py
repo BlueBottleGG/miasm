@@ -14,7 +14,7 @@ class LifterModelCallMsp430Base(Lifter_MSP430, LifterModelCall):
     def call_effects(self, addr, instr):
         call_assignblk = AssignBlock(
             [
-                ExprAssign(self.ret_reg, ExprOp('call_func_ret', addr, self.sp, self.arch.regs.R15)),
+                ExprAssign(self.ret_reg, ExprOp(f'call_func_ret_{self.ret_reg.size}', addr, self.sp, self.arch.regs.R15)),
                 ExprAssign(self.sp, ExprOp('call_func_stack', addr, self.sp))
             ],
             instr

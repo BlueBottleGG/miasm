@@ -192,7 +192,7 @@ def build_graph(start_addr, type_graph, simplify=False, use_ida_stack=True, dont
                 print(hex(stk_diff))
                 call_assignblk = AssignBlock(
                     [
-                        ExprAssign(self.ret_reg, ExprOp('call_func_ret', addr)),
+                        ExprAssign(self.ret_reg, ExprOp(f'call_func_ret_{self.ret_reg.size}', addr)),
                         ExprAssign(self.sp, self.sp + ExprInt(stk_diff, self.sp.size))
                     ],
                     instr

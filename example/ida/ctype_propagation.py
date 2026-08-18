@@ -234,7 +234,7 @@ def get_lifter_model_call_call_fixer(lifter_model_call):
             print(hex(stk_diff))
             call_assignblk = AssignBlock(
                 [
-                    ExprAssign(self.ret_reg, ExprOp('call_func_ret', ad)),
+                    ExprAssign(self.ret_reg, ExprOp(f'call_func_ret_{self.ret_reg.size}', ad)),
                     ExprAssign(self.sp, self.sp + ExprInt(stk_diff, self.sp.size))
                 ],
                 instr

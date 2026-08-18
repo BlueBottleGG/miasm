@@ -629,11 +629,6 @@ class Expr(object):
     def get_size(self):
         raise DeprecationWarning("use X.size instead of X.get_size()")
 
-    def is_function_call(self) -> bool:
-        """Returns true if the considered Expr is a function call
-        """
-        return False
-
     def _exprrepr(self) -> str:
         raise ValueError("Abstract method")
     
@@ -1393,7 +1388,7 @@ class ExprOp(Expr):
                     "FLAG_SUBWC_CF", "FLAG_SUBWC_OF",
                     "<<", ">>", "a>>", "<<<", ">>>"
 
-            ]:
+            ] and not op.startswith("call_func_ret_"):
                 raise ValueError(
                     "sanitycheck: ExprOp args must have same size! %s %s" %
                     (op, [(str(arg), arg.size) for arg in args]))
@@ -1440,6 +1435,8 @@ class ExprOp(Expr):
             size = int(self._op[8:])
         elif self._op.startswith('zeroExt_'):
             size = int(self._op[8:])
+        elif self._op.startswith('call_func_ret_'):
+            size = int(self._op[14:])
         elif self._op in ['segm']:
             size = self._args[1].size
         elif self._op in {"<<", ">>", "a>>", "<<<", ">>>"}:
@@ -1484,9 +1481,6 @@ class ExprOp(Expr):
     def _exprrepr(self):
         return "%s(%r, %s)" % (self.__class__.__name__, self._op,
                                ', '.join(repr(arg) for arg in self._args))
-
-    def is_function_call(self) -> bool:
-        return self._op.startswith('call')
 
     def is_infix(self):
         return self._op in [

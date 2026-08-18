@@ -16,7 +16,7 @@ class LifterModelCallMips32l(Lifter_Mips32l, LifterModelCall):
                 ExprAssign(
                     self.ret_reg,
                     ExprOp(
-                        'call_func_ret',
+                        f'call_func_ret_{self.ret_reg.size}',
                         ad,
                         self.arch.regs.A0,
                         self.arch.regs.A1,

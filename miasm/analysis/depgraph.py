@@ -5,7 +5,7 @@ from functools import total_ordering
 from future.utils import viewitems
 
 from miasm.expression.expression import ExprInt, ExprLoc, ExprAssign, \
-    ExprWalk, canonize_to_exprloc
+    ExprWalk, canonize_to_exprloc, is_function_call
 from miasm.core.graph import DiGraph
 from miasm.expression.simplifications import expr_simp_explicit
 from miasm.ir.symbexec import SymbolicExecutionEngine
@@ -482,7 +482,7 @@ class FilterExprSources(ExprWalk):
             else:
                 self.nofollow.add(expr)
                 return None
-        elif expr.is_function_call():
+        elif is_function_call(expr):
             if self.follow_call:
                 self.follow.add(expr)
             else:

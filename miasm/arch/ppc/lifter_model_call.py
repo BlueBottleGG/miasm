@@ -28,7 +28,7 @@ class LifterModelCallPpc32b(Lifter_PPC32b, LifterModelCall):
                 ExprAssign(
                     self.ret_reg,
                     ExprOp(
-                        'call_func_ret',
+                        f'call_func_ret_{self.ret_reg.size}',
                         ad,
                         self.sp,
                         self.arch.regs.R3,

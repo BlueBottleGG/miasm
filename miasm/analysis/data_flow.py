@@ -1536,7 +1536,7 @@ class DelDummyPhi(object):
             elif is_op(src, 'Phi'):
                 equivalence_graph.add_uniq_edge(src, dst)
                 for arg in src.args:
-                    assert is_id(arg)
+                    assert is_id(arg), arg
                     equivalence_graph.add_uniq_edge(arg, src)
                     todo.add(arg)
             else:

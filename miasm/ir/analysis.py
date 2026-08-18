@@ -44,7 +44,7 @@ class LifterModelCall(Lifter):
 
         call_assignblk = AssignBlock(
             [
-                ExprAssign(self.ret_reg, ExprOp('call_func_ret', addr, self.sp)),
+                ExprAssign(self.ret_reg, ExprOp(f'call_func_ret_{self.ret_reg.size}', addr, self.sp)),
                 ExprAssign(self.sp, ExprOp('call_func_stack', addr, self.sp))
             ],
             instr

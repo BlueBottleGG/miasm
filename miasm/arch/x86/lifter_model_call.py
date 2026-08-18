@@ -49,7 +49,7 @@ class LifterModelCall_x86_64(Lifter_X86_64, LifterModelCall_x86_16):
                 ExprAssign(
                     self.ret_reg,
                     ExprOp(
-                        'call_func_ret',
+                        f'call_func_ret_{self.ret_reg.size}',
                         ad,
                         self.sp,
                         self.arch.regs.RCX,
