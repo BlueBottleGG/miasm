@@ -9,6 +9,8 @@ from future.utils import PY3
 import miasm.expression.expression as m2_expr
 from miasm.ir.ir import IRBlock, AssignBlock
 
+def _is_ast_string(value):
+    return isinstance(value, ast.Constant) and isinstance(value.value, str)
 
 class MiasmTransformer(ast.NodeTransformer):
     """AST visitor translating DSL to Miasm expression
@@ -46,12 +48,12 @@ class MiasmTransformer(ast.NodeTransformer):
                 new_name = "ExprInt"
                 # Replace in the node
                 node.func.id = new_name
-                node.args.append(ast.Num(n=size))
+                node.args.append(ast.Constant(value=size))
 
-        elif (isinstance(node.func, ast.Str) or
+        elif (_is_ast_string(node.func) or
               (isinstance(node.func, ast.BinOp) and
                isinstance(node.func.op, ast.Mod) and
-               isinstance(node.func.left, ast.Str))):
+               _is_ast_string(node.func.left))):
             # 'op'(args...) -> ExprOp('op', args...)
             # ('op' % (fmt))(args...) -> ExprOp('op' % (fmt), args...)
             op_name = node.func
@@ -189,7 +191,7 @@ class SemBuilder(object):
                 blocks[-1][-1].append(res)
 
             elif (isinstance(statement, ast.Expr) and
-                  isinstance(statement.value, ast.Str)):
+                  _is_ast_string(statement.value)):
                 # String (docstring, comment, ...) -> keep it
                 real_body.append(statement)
 
