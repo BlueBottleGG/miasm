@@ -784,7 +784,7 @@ def get_interval_length(interval_in):
     return length
 
 
-def check_expr_below_stack(lifter: Lifter, expr: ExprMem) -> bool:
+def check_expr_below_stack(lifter: Lifter, expr: ExprMem, include_positive_sp_off: bool = False) -> bool:
     """
     Return False if expr pointer is below original stack pointer
     @lifter: lifter_model_call instance
@@ -794,12 +794,12 @@ def check_expr_below_stack(lifter: Lifter, expr: ExprMem) -> bool:
     diff = expr_simp(ptr - lifter.sp)
     if not is_int(diff):
         return True
-    if int(diff) == 0 or int(expr_simp(diff.msb())) == 0: # type: ignore
+    if include_positive_sp_off and (int(diff) == 0 or int(expr_simp(diff.msb())) == 0): # type: ignore
         return False
     return True
 
 
-def retrieve_stack_accesses(lifter: Lifter, ircfg: IRCFG) -> dict[Expr, tuple[int, str]]:
+def retrieve_stack_accesses(lifter: Lifter, ircfg: IRCFG, include_positive_sp_off: bool = False) -> dict[Expr, tuple[int, str]]:
     """
     Walk the ssa graph and find stack based variables.
     Return a dictionary linking stack base address to its size/name
@@ -812,7 +812,7 @@ def retrieve_stack_accesses(lifter: Lifter, ircfg: IRCFG) -> dict[Expr, tuple[in
             for dst, src in assignblk.items():
                 stack_vars.update(get_stack_accesses(lifter, dst))
                 stack_vars.update(get_stack_accesses(lifter, src))
-    stack_vars = [expr for expr in stack_vars if check_expr_below_stack(lifter, expr)]
+    stack_vars = [expr for expr in stack_vars if check_expr_below_stack(lifter, expr, include_positive_sp_off=include_positive_sp_off)]
 
     base_to_var: dict[Expr, set[ExprMem]] = {}
     for var in stack_vars:
@@ -873,7 +873,7 @@ def replace_mem_stack_vars(expr: Expr, base_to_info: dict[Expr, tuple[int, str]]
     return expr.visit(lambda expr:fix_stack_vars(expr, base_to_info))
 
 
-def replace_stack_vars(lifter: Lifter, ircfg: IRCFG) -> bool:
+def replace_stack_vars(lifter: Lifter, ircfg: IRCFG, include_positive_sp_off: bool = False) -> bool:
     """
     Try to replace stack based memory accesses by variables.
 
@@ -887,7 +887,7 @@ def replace_stack_vars(lifter: Lifter, ircfg: IRCFG) -> bool:
     @ircfg: IRCFG instance
     """
 
-    base_to_info = retrieve_stack_accesses(lifter, ircfg)
+    base_to_info = retrieve_stack_accesses(lifter, ircfg, include_positive_sp_off=include_positive_sp_off)
     modified = False
     for block in list(ircfg.blocks.values()):
         assignblks: list[AssignBlock] = []
