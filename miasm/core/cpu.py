@@ -921,6 +921,25 @@ class metamn(type):
     def __new__(mcs, name, bases, dct):
         if name == "cls_mn" or name.startswith('mn_'):
             return type.__new__(mcs, name, bases, dct)
+
+        # Serialized mnemonic classes already carry their registry number.
+        # Reuse the registered class instead of registering a duplicate when
+        # serializers such as dill reconstruct the dynamic type.
+        num = dct.get('num')
+        if isinstance(num, int) and bases:
+            base = bases[0]
+            if 0 <= num < len(base.all_mn):
+                existing = base.all_mn[num]
+                identity = ('name', 'mode', 'mn_len', 'args_permut')
+                if (
+                    existing.__name__ == name and
+                    all(
+                        key not in dct or getattr(existing, key, None) == dct[key]
+                        for key in identity
+                    )
+                ):
+                    return existing
+
         alias = dct.get('alias', False)
 
         fields = bases[0].mod_fields(dct['fields'])
