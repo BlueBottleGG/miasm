@@ -1,6 +1,6 @@
 from future.utils import viewitems, viewvalues
 
-from miasm.expression.expression import ExprId
+from miasm.expression.expression import ExprId, ExprCond
 from miasm.ir.ir import IRBlock, AssignBlock
 from miasm.analysis.ssa import get_phi_sources_parent_block, \
     irblock_has_phi
@@ -85,14 +85,42 @@ class UnSSADiGraph(object):
                     parent_to_parallel_copies.setdefault(parent, {})[new_var] = src
 
             for parent, parallel_copies in viewitems(parent_to_parallel_copies):
-                parent = ircfg.blocks[parent]
+                parent: IRBlock = ircfg.blocks[parent]
                 assignblks = list(parent)
                 # insert before IRDst, TODO: might need to check for interference as mentioned in the paper
                 # sanity checks for now:
                 jmp_block = parent[-1]
-                for jmp_src in jmp_block.values():
+
+                phi_conds = dict()
+                for jmp_dst, jmp_src in jmp_block.items():
+                    if jmp_dst != ircfg.IRDst:
+                        continue
+
                     jmp_read_values = set(filter(lambda expr: expr.is_id(), jmp_src.get_r(mem_read=True)))
-                    assert len(jmp_read_values & set(parallel_copies.keys())) == 0, "Interference between jmp instruction read set and parallel copy write set"
+                    jmp_read_values = list(jmp_read_values)
+                    if len(jmp_read_values) == 0:
+                        continue
+                    if not jmp_src.is_cond():
+                        continue
+
+                    if len(jmp_read_values) == 1 and jmp_read_values[0].is_id() and jmp_read_values[0].name.startswith("PhiCond"):
+                        continue
+
+                    id_expr = ExprId("PhiCond" + str(len(phi_conds)), jmp_src.cond.size)
+                    phi_conds[id_expr] = jmp_src.cond
+
+                    dst_count = 0
+                    for dst in jmp_block.keys():
+                        if dst == ircfg.IRDst:
+                            dst_count += 1
+                            continue
+                        phi_conds[dst] = jmp_block[dst]
+                    assert dst_count == 1
+
+                    repl_cond = ExprCond(id_expr, jmp_src.src1, jmp_src.src2)
+                    assignblks.insert(-1, AssignBlock(phi_conds, jmp_block.instr))
+                    assignblks[-1] = AssignBlock({ ircfg.IRDst: repl_cond }, jmp_block.instr)
+                
                 assignblks.insert(-1, AssignBlock(parallel_copies, jmp_block.instr))
                 new_irblock = IRBlock(parent.loc_db, parent.loc_key, assignblks)
                 ircfg.blocks[parent.loc_key] = new_irblock
