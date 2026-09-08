@@ -106,7 +106,7 @@ class UnSSADiGraph(object):
                     if len(jmp_read_values) == 1 and jmp_read_values[0].is_id() and jmp_read_values[0].name.startswith("PhiCond"):
                         continue
 
-                    id_expr = ExprId("PhiCond" + str(len(phi_conds)), jmp_src.cond.size)
+                    id_expr = ExprId("PhiCond" + str(len(phi_conds)) + "_" + str(jmp_src.cond.size), jmp_src.cond.size)
                     phi_conds[id_expr] = jmp_src.cond
 
                     dst_count = 0
