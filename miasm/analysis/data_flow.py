@@ -1514,9 +1514,7 @@ class DelDummyPhi(object):
     def get_equivalence_class(self, in_node: ExprId, ids_to_src: dict[ExprId, Expr]) -> tuple[Collection[ExprId], ExprId, Expr, DiGraph[Expr]] | None:
         todo = set([in_node])
         done = set[Expr]()
-        defined = set[Expr]()
         equivalence = set[Expr]()
-        src_to_dst: dict[Expr, ExprId] = {}
         equivalence_graph = DiGraph[Expr]()
         while todo:
             dst = todo.pop()
@@ -1528,8 +1526,6 @@ class DelDummyPhi(object):
             if src is None:
                 # Node is not defined
                 continue
-            src_to_dst[src] = dst
-            defined.add(dst)
             if is_id(src):
                 equivalence_graph.add_uniq_edge(src, dst)
                 todo.add(src)
