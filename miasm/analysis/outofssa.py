@@ -99,35 +99,46 @@ class UnSSADiGraph(object):
         for parent, copies in parent_copies.items():
             infos = self.liveness.blocks[parent].infos
             branch = self.ssa.graph.blocks[parent][-1]
-            branch_src = branch.get(self.ssa.graph.IRDst, None)
-            if branch_src is not None and is_cond(branch_src):
-                reads = set(filter(is_id, branch_src.cond.get_r(mem_read=True)))
-                if reads and not (len(reads) == 1 and next(iter(reads)).name.startswith("PhiCond")):
-                    cond_var = ExprId("PhiCond%s_%d_%d" % (
-                        parent, 0, branch_src.cond.size
-                    ), branch_src.cond.size)
-                    saved: dict[Expr, Expr] = {cond_var: branch_src.cond}
-                    saved.update((dst, src) for dst, src in branch.items()
-                                 if dst != self.ssa.graph.IRDst)
-                    branch_replacement = ExprCond(cond_var, branch_src.src1, branch_src.src2)
-                    self.virtual_branch_conditions[parent] = (saved, branch_replacement)
-                    infos[-1] = self.virtual_assignments_info({
-                        self.ssa.graph.IRDst: branch_replacement
-                    })
-                    infos.insert(-1, self.virtual_assignments_info(saved))
+            branch_src = branch[self.ssa.graph.IRDst]
+            preceding = {dst: src for dst, src in branch.items()
+                         if dst != self.ssa.graph.IRDst}
+            if is_cond(branch_src) and branch_src.cond.get_r(mem_read=True):
+                cond_var = ExprId("PhiCond%s_%d_%d" % (
+                    parent, 0, branch_src.cond.size
+                ), branch_src.cond.size)
+                saved: dict[Expr, Expr] = {cond_var: branch_src.cond, **preceding}
+                branch_replacement = ExprCond(cond_var, branch_src.src1, branch_src.src2)
+                self.virtual_branch_conditions[parent] = (saved, branch_replacement)
+                infos[-1] = self.virtual_assignments_info({
+                    self.ssa.graph.IRDst: branch_replacement
+                })
+                infos.insert(-1, self.virtual_assignments_info(saved))
+            else:
+                infos[-1] = self.virtual_assignments_info({self.ssa.graph.IRDst: branch_src})
+                if preceding:
+                    infos.insert(-1, self.virtual_assignments_info(preceding))
             infos.insert(-1, self.virtual_info(set(copies.values()), set(copies)))
 
-    def copy_overwrites_condition(self, copies: dict[ExprId, Expr], condition: Expr) -> bool:
-        """Check the names after coalescing, before emitting the copies."""
+    def condition_is_clobbered(self, copies: dict[ExprId, Expr],
+                               preceding: dict[Expr, Expr], condition: Expr) -> bool:
+        """Check writes moved before the jump using their coalesced names."""
         written = {
             self.get_best_merge_set_name(self.merge_state[dst])
             for dst in copies
         }
+        memory_write = False
+        for dst, src in preceding.items():
+            for var in ExprAssign(dst, src).get_w():
+                if is_id(var):
+                    written.add(self.get_best_merge_set_name(self.merge_state.get(var, [var])))
+                elif var.is_mem():
+                    memory_write = True
+        reads = condition.get_r(mem_read=True)
         read = {
             self.get_best_merge_set_name(self.merge_state.get(var, [var]))
-            for var in condition.get_r(mem_read=True) if is_id(var)
+            for var in reads if is_id(var)
         }
-        return not written.isdisjoint(read)
+        return not written.isdisjoint(read) or (memory_write and any(var.is_mem() for var in reads))
 
     def materialize_copies(self):
         """Insert only the Phi copies that coalescing could not eliminate."""
@@ -166,17 +177,19 @@ class UnSSADiGraph(object):
 
         for parent_loc, parallel_copies in parent_to_parallel_copies.items():
             parent = ircfg.blocks[parent_loc]
-            assignblks = list(parent)
             jmp_block = parent[-1]
-
             jump = jmp_block[ircfg.IRDst]
+            preceding = {dst: src for dst, src in jmp_block.items() if dst != ircfg.IRDst}
+            assignblks = list(parent)[:-1]
             if (parent_loc in self.virtual_branch_conditions and is_cond(jump) and
-                    self.copy_overwrites_condition(parallel_copies, jump.cond)):
+                    self.condition_is_clobbered(parallel_copies, preceding, jump.cond)):
                 saved, branch_replacement = self.virtual_branch_conditions[parent_loc]
-                assignblks.insert(-1, AssignBlock(saved, jmp_block.instr))
-                assignblks[-1] = AssignBlock({ircfg.IRDst: branch_replacement}, jmp_block.instr)
-
-            assignblks.insert(-1, AssignBlock(parallel_copies, jmp_block.instr))
+                assignblks.append(AssignBlock(saved, jmp_block.instr))
+                jump = branch_replacement
+            elif preceding:
+                assignblks.append(AssignBlock(preceding, jmp_block.instr))
+            assignblks.append(AssignBlock(parallel_copies, jmp_block.instr))
+            assignblks.append(AssignBlock({ircfg.IRDst: jump}, jmp_block.instr))
             ircfg.blocks[parent_loc] = IRBlock(parent.loc_db, parent.loc_key, assignblks)
 
     def create_copy_var(self, var: Expr) -> ExprId:
