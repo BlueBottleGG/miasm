@@ -203,11 +203,7 @@ class IRCFGSimplifierSSA(IRCFGSimplifierCommon):
         @ssa: SSADiGraph instance
         @head: Location instance of the graph head
         """
-        cfg_liveness = DiGraphLivenessSSA(ssa.graph)
-        cfg_liveness.init_var_info(self.lifter)
-        cfg_liveness.compute_liveness()
-
-        UnSSADiGraph(ssa, head, cfg_liveness)
+        UnSSADiGraph(ssa, head, self.lifter)
         return ssa.graph
 
     @fix_point

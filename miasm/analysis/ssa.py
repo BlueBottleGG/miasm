@@ -707,7 +707,7 @@ class Varinfo(object):
         self.index = index
 
 
-def get_var_assignment_src[B: IRBlockBase](ircfg: IRCFGBase[B], node: LocKey, variables: set[Expr]) -> Expr|None:
+def get_var_assignment_src[B: IRBlockBase](ircfg: IRCFGBase[B], node: LocKey, variables: Iterable[Expr]) -> Expr|None:
     """
     Return the variable of @variables which is written by the irblock at @node
     @node: Location
@@ -723,7 +723,7 @@ def get_var_assignment_src[B: IRBlockBase](ircfg: IRCFGBase[B], node: LocKey, va
     return None
 
 
-def get_phi_sources_parent_block(ircfg: IRCFGBase, loc_key: LocKey, sources) -> dict[Expr, set[LocKey]]:
+def get_phi_sources_parent_block(ircfg: IRCFGBase, loc_key: LocKey, sources: Iterable[Expr]) -> dict[Expr, set[LocKey]]:
     """
     Return a dictionary linking a variable to it's direct parent label
     which belong to a path which affects the node.
