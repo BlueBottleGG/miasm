@@ -2,9 +2,9 @@ from typing import Literal
 
 from heapq import merge
 
-from miasm.expression.expression import Expr, ExprId, ExprCond, ExprOp, LocKey, is_cond, is_id, is_op
+from miasm.expression.expression import Expr, ExprAssign, ExprId, ExprCond, ExprOp, LocKey, is_cond, is_id, is_op
 from miasm.ir.ir import IRBlock, AssignBlock, Lifter
-from miasm.analysis.data_flow import DiGraphLivenessSSA
+from miasm.analysis.data_flow import AssignBlockLivenessInfos, DiGraphLivenessSSA
 from miasm.analysis.ssa import SSADiGraph, get_phi_sources_parent_block, \
     irblock_has_phi
 
@@ -46,21 +46,91 @@ class UnSSADiGraph(object):
 
         # Launch the algorithm in several steps
         self.isolate_phi_nodes_block()
-        self.insert_parallel_copy()
         self.liveness = DiGraphLivenessSSA(ssa.graph)
+        self.init_virtual_liveness()
         self.liveness.init_var_info(lifter)
         self.liveness.compute_liveness()
         self.order_ssa_var_dom()
         self.init_phis_merge_state()
         self.aggressive_coalesce_block()
-        self.replace_merge_sets()   
+        self.materialize_copies()
+        self.replace_merge_sets()
         self.remove_phi()
         self.remove_assign_eq()
 
-    def insert_parallel_copy(self):
-        """
-        Materialize CSSA with distinct copies for every Phi input and result.
-        """
+    @staticmethod
+    def virtual_info(gen: set[Expr], kill: set[Expr]) -> AssignBlockLivenessInfos:
+        """A copy slot for liveness, without an assignment in the IRCFG."""
+        return AssignBlockLivenessInfos(AssignBlock({}), gen, kill)
+
+    @classmethod
+    def virtual_assignments_info(cls, assignments: dict[Expr, Expr]) -> AssignBlockLivenessInfos:
+        gen: set[Expr] = set()
+        kill: set[Expr] = set()
+        for dst, src in assignments.items():
+            assignment = ExprAssign(dst, src)
+            gen.update(assignment.get_r(mem_read=True))
+            kill.update(assignment.get_w())
+        return cls.virtual_info(gen, kill)
+
+    def init_virtual_liveness(self):
+        """Model Phi input/result copies in liveness without inserting them."""
+        parent_copies: dict[LocKey, dict[ExprId, ExprId]] = {}
+        for block_loc, destinations in self.phi_destinations.items():
+            pre_vars: set[Expr] = set()
+            post_vars: set[Expr] = set()
+            for dst in destinations:
+                post_vars.add(self.phi_new_var[dst])
+                for parent, src in self.phi_parent_sources[dst]:
+                    pre_var = self.phi_pre_vars[dst][parent]
+                    pre_vars.add(pre_var)
+                    parent_copies.setdefault(parent, {})[pre_var] = src
+
+            infos = self.liveness.blocks[block_loc].infos
+            infos[0] = self.virtual_info(pre_vars, post_vars)
+            infos.insert(1, self.virtual_info(post_vars, set(destinations)))
+            self.liveness.loc_key_to_phi_parents[block_loc] = {
+                self.phi_pre_vars[dst][parent]: {parent}
+                for dst in destinations
+                for parent, _ in self.phi_parent_sources[dst]
+            }
+
+        self.virtual_branch_conditions: dict[LocKey, tuple[dict[Expr, Expr], Expr]] = {}
+        for parent, copies in parent_copies.items():
+            infos = self.liveness.blocks[parent].infos
+            branch = self.ssa.graph.blocks[parent][-1]
+            branch_src = branch.get(self.ssa.graph.IRDst, None)
+            if branch_src is not None and is_cond(branch_src):
+                reads = set(filter(is_id, branch_src.cond.get_r(mem_read=True)))
+                if reads and not (len(reads) == 1 and next(iter(reads)).name.startswith("PhiCond")):
+                    cond_var = ExprId("PhiCond%s_%d_%d" % (
+                        parent, 0, branch_src.cond.size
+                    ), branch_src.cond.size)
+                    saved: dict[Expr, Expr] = {cond_var: branch_src.cond}
+                    saved.update((dst, src) for dst, src in branch.items()
+                                 if dst != self.ssa.graph.IRDst)
+                    branch_replacement = ExprCond(cond_var, branch_src.src1, branch_src.src2)
+                    self.virtual_branch_conditions[parent] = (saved, branch_replacement)
+                    infos[-1] = self.virtual_assignments_info({
+                        self.ssa.graph.IRDst: branch_replacement
+                    })
+                    infos.insert(-1, self.virtual_assignments_info(saved))
+            infos.insert(-1, self.virtual_info(set(copies.values()), set(copies)))
+
+    def copy_overwrites_condition(self, copies: dict[ExprId, Expr], condition: Expr) -> bool:
+        """Check the names after coalescing, before emitting the copies."""
+        written = {
+            self.get_best_merge_set_name(self.merge_state[dst])
+            for dst in copies
+        }
+        read = {
+            self.get_best_merge_set_name(self.merge_state.get(var, [var]))
+            for var in condition.get_r(mem_read=True) if is_id(var)
+        }
+        return not written.isdisjoint(read)
+
+    def materialize_copies(self):
+        """Insert only the Phi copies that coalescing could not eliminate."""
         ircfg = self.ssa.graph
         parent_to_parallel_copies: dict[LocKey, dict[ExprId, Expr]] = {}
 
@@ -76,14 +146,21 @@ class UnSSADiGraph(object):
                 pre_vars: list[ExprId] = []
                 for parent, src in self.phi_parent_sources[dst]:
                     pre_var = self.phi_pre_vars[dst][parent]
-                    pre_vars.append(pre_var)
-                    parent_to_parallel_copies.setdefault(parent, {})[pre_var] = src
-                phis[post_var] = ExprOp('Phi', *pre_vars)
-                post_copies[dst] = post_var
+                    if self.merge_state[pre_var] == self.merge_state.get(src, [src]):
+                        pre_vars.append(src)
+                    else:
+                        pre_vars.append(pre_var)
+                        parent_to_parallel_copies.setdefault(parent, {})[pre_var] = src
+                if self.merge_state[post_var] == self.merge_state.get(dst, [dst]):
+                    phis[dst] = ExprOp('Phi', *pre_vars)
+                else:
+                    phis[post_var] = ExprOp('Phi', *pre_vars)
+                    post_copies[dst] = post_var
 
             assignblks = list(irblock)
             assignblks[0] = AssignBlock(phis, irblock[0].instr)
-            assignblks.insert(1, AssignBlock(post_copies, irblock[0].instr))
+            if post_copies:
+                assignblks.insert(1, AssignBlock(post_copies, irblock[0].instr))
             new_irblock = IRBlock(irblock.loc_db, irblock.loc_key, assignblks)
             ircfg.blocks[irblock.loc_key] = new_irblock
 
@@ -92,37 +169,12 @@ class UnSSADiGraph(object):
             assignblks = list(parent)
             jmp_block = parent[-1]
 
-            phi_conds = dict()
-            for jmp_dst, jmp_src in jmp_block.items():
-                if jmp_dst != ircfg.IRDst:
-                    continue
-
-                jmp_read_values = set(filter(lambda expr: is_id(expr), jmp_src.get_r(mem_read=True)))
-                jmp_read_values = list(jmp_read_values)
-                if len(jmp_read_values) == 0:
-                    continue
-                if not is_cond(jmp_src):
-                    continue
-
-                if len(jmp_read_values) == 1 and is_id(jmp_read_values[0]) and jmp_read_values[0].name.startswith("PhiCond"):
-                    continue
-
-                id_expr = ExprId("PhiCond%s_%d_%d" % (
-                    parent_loc, len(phi_conds), jmp_src.cond.size
-                ), jmp_src.cond.size)
-                phi_conds[id_expr] = jmp_src.cond
-
-                dst_count = 0
-                for dst in jmp_block.keys():
-                    if dst == ircfg.IRDst:
-                        dst_count += 1
-                        continue
-                    phi_conds[dst] = jmp_block[dst]
-                assert dst_count == 1
-
-                repl_cond = ExprCond(id_expr, jmp_src.src1, jmp_src.src2)
-                assignblks.insert(-1, AssignBlock(phi_conds, jmp_block.instr))
-                assignblks[-1] = AssignBlock({ircfg.IRDst: repl_cond}, jmp_block.instr)
+            jump = jmp_block[ircfg.IRDst]
+            if (parent_loc in self.virtual_branch_conditions and is_cond(jump) and
+                    self.copy_overwrites_condition(parallel_copies, jump.cond)):
+                saved, branch_replacement = self.virtual_branch_conditions[parent_loc]
+                assignblks.insert(-1, AssignBlock(saved, jmp_block.instr))
+                assignblks[-1] = AssignBlock({ircfg.IRDst: branch_replacement}, jmp_block.instr)
 
             assignblks.insert(-1, AssignBlock(parallel_copies, jmp_block.instr))
             ircfg.blocks[parent_loc] = IRBlock(parent.loc_db, parent.loc_key, assignblks)
@@ -202,14 +254,14 @@ class UnSSADiGraph(object):
         live_index = 0
 
         for loc_key in order:
-            irblock = ircfg.blocks.get(loc_key, None)
-            if irblock is None:
+            block = self.liveness.blocks.get(loc_key)
+            if block is None:
                 continue
 
             # Number all definitions, including the virtual copies.
-            for index, assignblk in enumerate(irblock):
+            for index, info in enumerate(block.infos):
                 used = False
-                for dst in assignblk:
+                for dst in info.kill:
                     if not dst.is_id():
                         continue
                     if dst in self.ssa.immutable_ids:
@@ -236,8 +288,6 @@ class UnSSADiGraph(object):
     def ssa_def_is_live_at(self, node_a: Expr, node_b: Expr) -> bool:
         """
         Return True if @node_a is live after @node_b's definition.
-
-        @parent is retained for callers; CSSA liveness models the edge copies.
         """
         info_b = self.var_to_varinfo[node_b]
         return node_a in self.liveness.blocks[info_b.loc_key].infos[info_b.index].var_out
@@ -247,7 +297,6 @@ class UnSSADiGraph(object):
         Return True if @node_a and @node_b interfere
         @node_a: variable
         @node_b: variable
-        @parent: Optional parent location of the phi source for liveness tests
 
         Interference check is: is x live at y definition (or reverse)
         TODO: add Value-based interference improvement
@@ -266,7 +315,6 @@ class UnSSADiGraph(object):
 
         @merge_a: pre-DFS-ordered list of equivalent variables
         @merge_b: pre-DFS-ordered list of equivalent variables
-        @parent: retained for callers; CSSA liveness models the edge copies
         """
         if merge_a == merge_b:
             return False
