@@ -53,6 +53,7 @@ TOK_INF_EQUAL = "<="
 TOK_INF_EQUAL_SIGNED = TOK_INF_EQUAL + "s"
 TOK_INF_EQUAL_UNSIGNED = TOK_INF_EQUAL + "u"
 TOK_EQUAL = "=="
+TOK_NOT_EQUAL = "!="
 TOK_POS = "pos"
 TOK_POS_STRICT = "Spos"
 
@@ -1401,7 +1402,7 @@ class ExprOp(Expr):
 
         # Set size for special cases
         if self._op in [
-                TOK_EQUAL, 'parity', 'fcom_c0', 'fcom_c1', 'fcom_c2', 'fcom_c3',
+                TOK_EQUAL, TOK_NOT_EQUAL, 'parity', 'fcom_c0', 'fcom_c1', 'fcom_c2', 'fcom_c3',
                 'fxam_c0', 'fxam_c1', 'fxam_c2', 'fxam_c3',
                 "access_segment_ok", "load_segment_limit_ok", "bcdadd_cf",
                 "ucomiss_zf", "ucomiss_pf", "ucomiss_cf",
@@ -1410,7 +1411,7 @@ class ExprOp(Expr):
         elif self._op in [TOK_INF, TOK_INF_SIGNED,
                            TOK_INF_UNSIGNED, TOK_INF_EQUAL,
                            TOK_INF_EQUAL_SIGNED, TOK_INF_EQUAL_UNSIGNED,
-                           TOK_EQUAL, TOK_POS,
+                           TOK_EQUAL, TOK_NOT_EQUAL, TOK_POS,
                            TOK_POS_STRICT,
                           ]:
             size = 1
@@ -1490,7 +1491,7 @@ class ExprOp(Expr):
             TOK_INF_SIGNED,
             TOK_INF_EQUAL_UNSIGNED,
             TOK_INF_EQUAL_SIGNED,
-            TOK_EQUAL
+            TOK_EQUAL, TOK_NOT_EQUAL
         ]
 
     def is_associative(self):
