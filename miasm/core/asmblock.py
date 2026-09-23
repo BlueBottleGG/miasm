@@ -11,7 +11,7 @@ from future.utils import viewitems, viewvalues
 
 from miasm.expression.expression import ExprId, ExprInt, get_expr_locs
 from miasm.expression.expression import LocKey
-from miasm.expression.simplifications import expr_simp
+from miasm.expression.simplifications import create_expr_simp
 from miasm.core.utils import Disasm_Exception, pck
 from miasm.core.graph import DiGraph, DiGraphSimplifier, MatchGraphJoker
 from miasm.core.interval import interval
@@ -735,8 +735,10 @@ def _merge_blocks(dg, graph):
         to_ignore.add(lbl_succ)
 
 
-bbl_simplifier = DiGraphSimplifier()
-bbl_simplifier.enable_passes([_merge_blocks])
+def create_bbl_simplifier():
+    simplifier = DiGraphSimplifier()
+    simplifier.enable_passes([_merge_blocks])
+    return simplifier
 
 
 def conservative_asm(mnemo, instr, symbols, conservative):
@@ -770,7 +772,7 @@ def fix_expr_val(expr, symbols):
             e = ExprInt(offset, e.size)
         return e
     result = expr.visit(expr_calc)
-    result = expr_simp(result)
+    result = create_expr_simp()(result)
     if not isinstance(result, ExprInt):
         raise RuntimeError('Cannot resolve symbol %s' % expr)
     return result

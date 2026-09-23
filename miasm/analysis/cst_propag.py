@@ -5,7 +5,6 @@ from future.utils import viewitems
 from miasm.ir.symbexec import SymbolicExecutionEngine
 from miasm.expression.expression import ExprMem
 from miasm.expression.expression_helper import possible_values
-from miasm.expression.simplifications import expr_simp
 from miasm.ir.ir import IRBlock, AssignBlock
 
 LOG_CST_PROPAG = logging.getLogger("cst_propag")
@@ -85,7 +84,7 @@ class SymbExecStateFix(SymbolicExecutionEngine):
             value = self.eval_expr(element)
             if self.is_expr_cst(self.lifter, value):
                 to_propag[element] = value
-        return expr_simp(expr.replace_expr(to_propag))
+        return self.expr_simp(expr.replace_expr(to_propag))
 
     def eval_updt_irblock(self, irb, step=False):
         """

@@ -7,8 +7,11 @@ from argparse import ArgumentParser
 import logging
 
 from miasm.expression.expression import *
-from miasm.expression.simplifications import expr_simp, expr_simp_explicit, \
+from miasm.expression.simplifications import create_expr_simp, create_expr_simp_explicit, \
     ExpressionSimplifier, log_exprsimp
+
+expr_simp = create_expr_simp()
+expr_simp_explicit = create_expr_simp_explicit()
 
 from miasm.expression.simplifications_cond import ExprOp_inf_signed, ExprOp_inf_unsigned, ExprOp_equal
 

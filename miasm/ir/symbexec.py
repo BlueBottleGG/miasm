@@ -10,7 +10,7 @@ from future.utils import viewitems
 
 from miasm.expression.expression import ExprOp, ExprId, ExprLoc, ExprInt, \
     ExprMem, ExprCompose, ExprSlice, ExprCond
-from miasm.expression.simplifications import expr_simp_explicit
+from miasm.expression.simplifications import create_expr_simp_explicit
 from miasm.ir.ir import AssignBlock
 
 log = logging.getLogger("symbexec")
@@ -144,9 +144,9 @@ class MemArray(MutableMapping):
 
     """
 
-    def __init__(self, base, expr_simp=expr_simp_explicit):
+    def __init__(self, base, expr_simp=None):
         self._base = base
-        self.expr_simp = expr_simp
+        self.expr_simp = expr_simp if expr_simp is not None else create_expr_simp_explicit()
         self._mask = int(base.mask)
         self._offset_to_expr = {}
 
@@ -471,13 +471,13 @@ class MemSparse(object):
 
     """
 
-    def __init__(self, addrsize, expr_simp=expr_simp_explicit):
+    def __init__(self, addrsize, expr_simp=None):
         """
         @addrsize: size (in bits) of the addresses manipulated by the MemSparse
         @expr_simp: an ExpressionSimplifier instance
         """
         self.addrsize = addrsize
-        self.expr_simp = expr_simp
+        self.expr_simp = expr_simp if expr_simp is not None else create_expr_simp_explicit()
         self.base_to_memarray = {}
 
     def __contains__(self, expr):
@@ -614,14 +614,14 @@ class MemSparse(object):
 class SymbolMngr(object):
     """Symbolic store manager (IDs and MEMs)"""
 
-    def __init__(self, init=None, addrsize=None, expr_simp=expr_simp_explicit):
+    def __init__(self, init=None, addrsize=None, expr_simp=None):
         assert addrsize is not None
         if init is None:
             init = {}
         self.addrsize = addrsize
-        self.expr_simp = expr_simp
+        self.expr_simp = expr_simp if expr_simp is not None else create_expr_simp_explicit()
         self.symbols_id = {}
-        self.symbols_mem = MemSparse(addrsize, expr_simp)
+        self.symbols_mem = MemSparse(addrsize, self.expr_simp)
         self.mask = (1 << addrsize) - 1
         for expr, value in viewitems(init):
             self.write(expr, value)
@@ -807,7 +807,10 @@ class SymbolicExecutionEngine(object):
     StateEngine = SymbolicState
 
     def __init__(self, lifter, state=None,
-                 sb_expr_simp=expr_simp_explicit):
+                 sb_expr_simp=None):
+
+        if sb_expr_simp is None:
+            sb_expr_simp = create_expr_simp_explicit()
 
         self.expr_to_visitor = {
             ExprInt: self.eval_exprint,

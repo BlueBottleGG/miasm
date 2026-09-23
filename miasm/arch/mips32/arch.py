@@ -38,8 +38,8 @@ def cb_deref_nooff(tokens):
 
 base_expr = cpu.base_expr
 
-deref_off = (Optional(base_expr) + LPARENTHESIS + gpregs.parser + RPARENTHESIS).setParseAction(cb_deref)
-deref_nooff = (LPARENTHESIS + gpregs.parser + RPARENTHESIS).setParseAction(cb_deref_nooff)
+deref_off = (Optional(base_expr) + LPARENTHESIS + gpregs.parser + RPARENTHESIS).setParseAction(cpu.parse_action_tokens(cb_deref))
+deref_nooff = (LPARENTHESIS + gpregs.parser + RPARENTHESIS).setParseAction(cpu.parse_action_tokens(cb_deref_nooff))
 deref = deref_off | deref_nooff
 
 
@@ -192,7 +192,6 @@ class mn_mips32(cpu.cls_mn):
     all_mn = []
     all_mn_mode = defaultdict(list)
     all_mn_name = defaultdict(list)
-    all_mn_inst = defaultdict(list)
     pc = {'l':regs.PC, 'b':regs.PC}
     sp = {'l':regs.SP, 'b':regs.SP}
     instruction = instruction_mips32
@@ -304,6 +303,13 @@ class mips32_reg(cpu.reg_noarg, mips32_arg):
 class mips32_gpreg(mips32_reg):
     reg_info = gpregs
     parser = reg_info.parser
+
+class mips32_clz_rt(cpu.reg_noarg):
+    reg_info = gpregs
+
+    def encode(self):
+        self.expr = self.parent.args[0].expr
+        return super().encode()
 
 class mips32_fltpreg(mips32_reg):
     reg_info = regs.fltregs
@@ -496,8 +502,8 @@ class mips32_cpr(mips32_arg):
             return False
         index = regs.regs_cpr0_expr.index(e)
         self.value = index & 7
-        index >>=2
-        self.parent.cpr0.value = index
+        index >>= 3
+        self.parent.cpr0.expr = ExprInt(index, 32)
         return True
 
 rs = cpu.bs(l=5, cls=(mips32_gpreg,))
@@ -515,7 +521,7 @@ base = cpu.bs(l=5, cls=(mips32_dreg_imm,))
 soff = cpu.bs(l=16, cls=(mips32_soff,))
 oper = cpu.bs(l=5, cls=(mips32_u16imm,))
 
-cpr0 = cpu.bs(l=5, cls=(mips32_imm,), fname="cpr0")
+cpr0 = cpu.bs(l=5, cls=(mips32_imm,), fname="cpr0", order=-1)
 cpr =  cpu.bs(l=3, cls=(mips32_cpr,))
 
 stype = cpu.bs(l=5, cls=(mips32_u16imm,))
@@ -809,7 +815,7 @@ mips32op("teq",     [cpu.bs('000000'), rs, rt, bs_code, cpu.bs('110100')],
 mips32op("tne",     [cpu.bs('000000'), rs, rt, bs_code, cpu.bs('110110')],         
          [rs, rt])
 
-mips32op("clz",     [cpu.bs('011100'), rs, rt, rd, cpu.bs('00000'), cpu.bs('100000')],
+mips32op("clz",     [cpu.bs('011100'), rs, cpu.bs(l=5, cls=(mips32_clz_rt,)), rd, cpu.bs('00000'), cpu.bs('100000')],
         [rd, rs])
 mips32op("clz",     [cpu.bs('000000'), rs, cpu.bs('00000'), rd, cpu.bs('00001010000')],
         [rd, rs])
@@ -835,4 +841,3 @@ mips32op("eret",    [cpu.bs('01000010000000000000000000011000')], [])
 
 mips32op("mtlo",    [cpu.bs('000000'), rs, cpu.bs('000000000000000'), cpu.bs('010011')], [rs])
 mips32op("mthi",    [cpu.bs('000000'), rs, cpu.bs('000000000000000'), cpu.bs('010001')], [rs])
-

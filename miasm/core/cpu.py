@@ -15,7 +15,7 @@ from miasm.core.utils import decode_hex
 import miasm.expression.expression as m2_expr
 from miasm.core.bin_stream import bin_stream, bin_stream_str
 from miasm.core.utils import Disasm_Exception
-from miasm.expression.simplifications import expr_simp
+from miasm.expression.simplifications import create_expr_simp
 
 
 from miasm.core.asm_ast import AstNode, AstInt, AstId, AstOp
@@ -93,12 +93,17 @@ def literal_list(l):
     return o
 
 
+def parse_action_tokens(callback):
+    """Give pyparsing a fixed-arity action safe for concurrent first parses."""
+    return lambda _text, _offset, tokens: callback(tokens)
+
+
 class reg_info(object):
 
     def __init__(self, reg_str, reg_expr):
         self.str = reg_str
         self.expr = reg_expr
-        self.parser = literal_list(reg_str).setParseAction(self.cb_parse)
+        self.parser = literal_list(reg_str).setParseAction(parse_action_tokens(self.cb_parse))
 
     def cb_parse(self, tokens):
         assert len(tokens) == 1
@@ -122,7 +127,7 @@ class reg_info_dct(object):
         self.dct_expr = reg_expr
         self.dct_expr_inv = dict((v, k) for k, v in viewitems(reg_expr))
         reg_str = [v.name for v in viewvalues(reg_expr)]
-        self.parser = literal_list(reg_str).setParseAction(self.cb_parse)
+        self.parser = literal_list(reg_str).setParseAction(parse_action_tokens(self.cb_parse))
 
     def cb_parse(self, tokens):
         assert len(tokens) == 1
@@ -237,17 +242,17 @@ def neg_int(tokens):
     return x
 
 
-integer = pyparsing.Word(pyparsing.nums).setParseAction(lambda tokens: int(tokens[0]))
+integer = pyparsing.Word(pyparsing.nums).setParseAction(parse_action_tokens(lambda tokens: int(tokens[0])))
 hex_word = pyparsing.Literal('0x') + pyparsing.Word(pyparsing.hexnums)
-hex_int = pyparsing.Combine(hex_word).setParseAction(lambda tokens: int(tokens[0], 16))
+hex_int = pyparsing.Combine(hex_word).setParseAction(parse_action_tokens(lambda tokens: int(tokens[0], 16)))
 
 # str_int = (Optional('-') + (hex_int | integer))
 str_int_pos = (hex_int | integer)
 str_int_neg = (pyparsing.Suppress('-') + \
-                   (hex_int | integer)).setParseAction(neg_int)
+                   (hex_int | integer)).setParseAction(parse_action_tokens(neg_int))
 
 str_int = str_int_pos | str_int_neg
-str_int.setParseAction(int2expr)
+str_int.setParseAction(parse_action_tokens(int2expr))
 
 logicop = pyparsing.oneOf('& | ^ >> << <<< >>>')
 signop = pyparsing.oneOf('+ -')
@@ -368,14 +373,14 @@ def cb_op_mul(tokens):
     return result
 
 
-integer = pyparsing.Word(pyparsing.nums).setParseAction(lambda tokens: int(tokens[0]))
+integer = pyparsing.Word(pyparsing.nums).setParseAction(parse_action_tokens(lambda tokens: int(tokens[0])))
 hex_word = pyparsing.Literal('0x') + pyparsing.Word(pyparsing.hexnums)
-hex_int = pyparsing.Combine(hex_word).setParseAction(lambda tokens: int(tokens[0], 16))
+hex_int = pyparsing.Combine(hex_word).setParseAction(parse_action_tokens(lambda tokens: int(tokens[0], 16)))
 
 str_int_pos = (hex_int | integer)
 
 str_int = str_int_pos
-str_int.setParseAction(cb_int)
+str_int.setParseAction(parse_action_tokens(cb_int))
 
 notop = pyparsing.oneOf('!')
 andop = pyparsing.oneOf('&')
@@ -390,17 +395,17 @@ divop = pyparsing.oneOf('/')
 
 
 variable = pyparsing.Word(pyparsing.alphas + "_$.", pyparsing.alphanums + "_")
-variable.setParseAction(cb_parse_id)
+variable.setParseAction(parse_action_tokens(cb_parse_id))
 operand = str_int | variable
 
 base_expr = pyparsing.infixNotation(operand,
-                               [(notop,   1, pyparsing.opAssoc.RIGHT, cb_op_not),
-                                (andop, 2, pyparsing.opAssoc.RIGHT, cb_op_and),
-                                (xorop, 2, pyparsing.opAssoc.RIGHT, cb_op_xor),
-                                (signop,  1, pyparsing.opAssoc.RIGHT, cb_op_sign),
-                                (mulop,  2, pyparsing.opAssoc.RIGHT, cb_op_mul),
-                                (divop,  2, pyparsing.opAssoc.RIGHT, cb_op_div),
-                                (plusop,  2, pyparsing.opAssoc.LEFT, cb_op_plusminus),
+                               [(notop,   1, pyparsing.opAssoc.RIGHT, parse_action_tokens(cb_op_not)),
+                                (andop, 2, pyparsing.opAssoc.RIGHT, parse_action_tokens(cb_op_and)),
+                                (xorop, 2, pyparsing.opAssoc.RIGHT, parse_action_tokens(cb_op_xor)),
+                                (signop,  1, pyparsing.opAssoc.RIGHT, parse_action_tokens(cb_op_sign)),
+                                (mulop,  2, pyparsing.opAssoc.RIGHT, parse_action_tokens(cb_op_mul)),
+                                (divop,  2, pyparsing.opAssoc.RIGHT, parse_action_tokens(cb_op_div)),
+                                (plusop,  2, pyparsing.opAssoc.LEFT, parse_action_tokens(cb_op_plusminus)),
                                 ])
 
 
@@ -425,7 +430,6 @@ def myrol32(v, r):
 
 
 class bs(object):
-    all_new_c = {}
     prio = default_prio
 
     def __init__(self, strbits=None, l=None, cls=None,
@@ -473,6 +477,9 @@ class bs(object):
         self.flen = flen
         self.value = value
         self.kargs = kargs
+        bases = tuple(cls or ()) + (bsi,)
+        name = 'nbsi' + ''.join('_' + base.__name__ for base in cls or ())
+        self._field_type = type(name, bases, {})
 
     lmask = property(lambda self:(1 << self.l) - 1)
 
@@ -489,22 +496,7 @@ class bs(object):
         return o
 
     def gen(self, parent):
-        c_name = 'nbsi'
-        if self.cls:
-            c_name += '_' + '_'.join([x.__name__ for x in self.cls])
-            bases = list(self.cls)
-        else:
-            bases = []
-        # bsi added at end of list
-        # used to use first function of added class
-        bases += [bsi]
-        k = c_name, tuple(bases)
-        if k in self.all_new_c:
-            new_c = self.all_new_c[k]
-        else:
-            new_c = type(c_name, tuple(bases), {})
-            self.all_new_c[k] = new_c
-        c = new_c(parent,
+        c = self._field_type(parent,
                   self.strbits, self.l, self.cls,
                   self.fname, self.order, self.lmask, self.fbits,
                   self.fmask, self.value, self.flen, **self.kargs)
@@ -770,9 +762,6 @@ def gen_bsint(value, l, args):
     f = bs(**args)
     return f
 
-total_scans = 0
-
-
 def branch2nodes(branch, nodes=None):
     if nodes is None:
         nodes = []
@@ -980,7 +969,6 @@ class metamn(type):
             bases[0].all_mn_name[c.name].append(c)
             i = c()
             i.init_class()
-            bases[0].all_mn_inst[c].append(i)
             add_candidate(bases, c)
             # gen byte lookup
             o = ""
@@ -1046,6 +1034,7 @@ class instruction(object):
         return m2_expr.ExprInt(self.offset+self.l, expr.size)
 
     def resolve_args_with_symbols(self, loc_db):
+        expr_simp = create_expr_simp()
         args_out = []
         for expr in self.args:
             # try to resolve symbols using loc_db (0 for default value)
@@ -1196,6 +1185,7 @@ class cls_mn(with_metaclass(metamn, object)):
 
     @classmethod
     def dis(cls, bs_o, mode_o = None, offset=0):
+        expr_simp = create_expr_simp()
         if not isinstance(bs_o, bin_stream):
             bs_o = bin_stream_str(bs_o)
 
@@ -1225,8 +1215,8 @@ class cls_mn(with_metaclass(metamn, object)):
             log.debug("*" * 40, mode, c.mode)
             log.debug(c.fields)
 
-            c = cls.all_mn_inst[c][0]
-
+            c = c()
+            c.init_class()
             c.reset_class()
             c.mode = mode
 
@@ -1319,7 +1309,7 @@ class cls_mn(with_metaclass(metamn, object)):
 
     @classmethod
     def fromstring(cls, text, loc_db, mode = None):
-        global total_scans
+        expr_simp = create_expr_simp()
         name = re.search(r'(\S+)', text).groups()
         if not name:
             raise ValueError('cannot find name', text)
@@ -1351,7 +1341,6 @@ class cls_mn(with_metaclass(metamn, object)):
                         if p in parsers[(i, start_i)]:
                             continue
                         try:
-                            total_scans += 1
                             v, start, stop = next(p.scanString(args_str))
                         except StopIteration:
                             v, start, stop = [None], None, None
@@ -1400,8 +1389,8 @@ class cls_mn(with_metaclass(metamn, object)):
 
     @classmethod
     def get_cls_instance(cls, cc, mode, infos=None):
-        c = cls.all_mn_inst[cc][0]
-
+        c = cc()
+        c.init_class()
         c.reset_class()
         c.add_pre_dis_info()
         c.dup_info(infos)
@@ -1415,7 +1404,7 @@ class cls_mn(with_metaclass(metamn, object)):
         Re asm instruction by searching mnemo using name and args. We then
         can modify args and get the hex of a modified instruction
         """
-        clist = cls.all_mn_name[instr.name]
+        clist = cls.all_mn_name.get(instr.name, ())
         clist = [x for x in clist]
         vals = []
         candidates = []

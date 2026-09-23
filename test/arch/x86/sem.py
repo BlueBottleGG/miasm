@@ -17,7 +17,6 @@ from miasm.arch.x86.arch import mn_x86 as mn
 from miasm.arch.x86.sem import Lifter_X86_32, Lifter_X86_64
 from miasm.arch.x86.regs import *
 from miasm.expression.expression import *
-from miasm.expression.simplifications import expr_simp
 from miasm.core import parse_asm, asmblock
 from miasm.core.locationdb import LocationDB
 

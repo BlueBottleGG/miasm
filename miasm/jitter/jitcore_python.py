@@ -3,7 +3,7 @@ from builtins import zip
 import miasm.jitter.jitcore as jitcore
 from miasm.expression.expression import ExprInt, ExprLoc
 import miasm.jitter.csts as csts
-from miasm.expression.simplifications import expr_simp_explicit
+from miasm.expression.simplifications import create_expr_simp_explicit
 from miasm.jitter.emulatedsymbexec import EmulatedSymbExec
 
 ################################################################################
@@ -26,7 +26,7 @@ class JitCore_Python(jitcore.JitCore):
         self.symbexec = self.SymbExecClass(
             None, None,
             self.lifter, {},
-            sb_expr_simp=expr_simp_explicit
+            sb_expr_simp=create_expr_simp_explicit()
         )
         self.symbexec.enable_emulated_simplifications()
 

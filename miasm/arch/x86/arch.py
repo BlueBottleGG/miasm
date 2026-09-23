@@ -210,9 +210,9 @@ def cb_deref_base_expr(tokens):
     return addr
 
 
-deref_mem_ad = (LBRACK + base_expr + RBRACK).setParseAction(cb_deref_base_expr)
+deref_mem_ad = (LBRACK + base_expr + RBRACK).setParseAction(parse_action_tokens(cb_deref_base_expr))
 
-deref_ptr = (base_expr + COLON + base_expr).setParseAction(cb_deref_segmoff)
+deref_ptr = (base_expr + COLON + base_expr).setParseAction(parse_action_tokens(cb_deref_segmoff))
 
 
 PTR = Suppress('PTR')
@@ -243,7 +243,7 @@ def cb_deref_mem(tokens):
     raise ValueError('len(tokens) > 3')
 
 mem_size = (BYTE | DWORD | QWORD | WORD | TBYTE | XMMWORD)
-deref_mem = (mem_size + PTR + Optional((base_expr + COLON))+ deref_mem_ad).setParseAction(cb_deref_mem)
+deref_mem = (mem_size + PTR + Optional((base_expr + COLON))+ deref_mem_ad).setParseAction(parse_action_tokens(cb_deref_mem))
 
 
 rmarg = (
@@ -676,7 +676,6 @@ class mn_x86(cls_mn):
     all_mn = []
     all_mn_mode = defaultdict(list)
     all_mn_name = defaultdict(list)
-    all_mn_inst = defaultdict(list)
     bintree = {}
     num = 0
     delayslot = 0

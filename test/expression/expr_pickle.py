@@ -33,17 +33,6 @@ assert aff == new_aff
 assert new_a + new_b == a + b
 
 
-assert a is new_a
-assert b is new_b
-assert c is new_c
-assert d is new_d
-assert e is new_e
-assert f is new_f
-assert aff is new_aff
-assert new_a + new_b is a + b
-
-Expr.use_singleton = False
-
 new_a, new_b, new_c, new_d, new_e, new_f, new_aff = pickle.loads(out)
 
 

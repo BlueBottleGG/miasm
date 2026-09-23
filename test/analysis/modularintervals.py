@@ -4,7 +4,9 @@ from random import shuffle, seed
 from miasm.core.interval import interval
 from miasm.analysis.modularintervals import ModularIntervals
 from miasm.expression.expression import *
-from miasm.expression.simplifications import expr_simp
+from miasm.expression.simplifications import create_expr_simp
+
+expr_simp = create_expr_simp()
 
 
 def gen_all_intervals(size):

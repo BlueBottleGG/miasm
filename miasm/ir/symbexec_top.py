@@ -1,7 +1,7 @@
 from future.utils import viewitems
 
 from miasm.ir.symbexec import SymbolicExecutionEngine, StateEngine
-from miasm.expression.simplifications import expr_simp
+from miasm.expression.simplifications import create_expr_simp
 from miasm.expression.expression import ExprId, ExprInt, ExprSlice,\
     ExprMem, ExprCond, ExprCompose, ExprOp
 
@@ -88,7 +88,9 @@ class SymbExecTopNoMem(SymbolicExecutionEngine):
     StateEngine = SymbolicStateTop
 
     def __init__(self, lifter, state, regstop,
-                 sb_expr_simp=expr_simp):
+                 sb_expr_simp=None):
+        if sb_expr_simp is None:
+            sb_expr_simp = create_expr_simp()
         known_symbols = dict(state)
         super(SymbExecTopNoMem, self).__init__(lifter, known_symbols,
                                                sb_expr_simp)

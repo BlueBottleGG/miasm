@@ -10,6 +10,7 @@ from collections import defaultdict
 from miasm.core.bin_stream import bin_stream
 import miasm.arch.msp430.regs as regs_module
 from miasm.arch.msp430.regs import *
+from pyparsing import Literal
 from miasm.core.asm_ast import AstInt, AstId, AstMem, AstOp
 from miasm.ir.ir import color_expr_html
 
@@ -54,10 +55,10 @@ RPARENT = Suppress(")")
 
 PINC = Suppress("+")
 
-deref_nooff = (ARO + base_expr).setParseAction(cb_deref_nooff)
-deref_pinc = (ARO + base_expr + PINC).setParseAction(cb_deref_pinc)
-deref_off = (base_expr + LPARENT + gpregs.parser + RPARENT).setParseAction(cb_deref_off)
-sreg_p = (deref_pinc | deref_nooff | deref_off | base_expr).setParseAction(cb_expr)
+deref_nooff = (ARO + base_expr).setParseAction(parse_action_tokens(cb_deref_nooff))
+deref_pinc = (ARO + base_expr + PINC).setParseAction(parse_action_tokens(cb_deref_pinc))
+deref_off = (base_expr + LPARENT + gpregs.parser + RPARENT).setParseAction(parse_action_tokens(cb_deref_off))
+sreg_p = (deref_pinc | deref_nooff | deref_off | base_expr).setParseAction(parse_action_tokens(cb_expr))
 
 
 
@@ -238,7 +239,6 @@ class mn_msp430(cls_mn):
     sp = {None: SP}
     all_mn_mode = defaultdict(list)
     all_mn_name = defaultdict(list)
-    all_mn_inst = defaultdict(list)
     instruction = instruction_msp430
     max_instruction_len = 8
 
@@ -607,4 +607,3 @@ offimm = bs(l=10, cls=(msp430_offs,), fname="offs", order=-1)
 bs_f2_jcc = bs_name(l=3, name={'jnz': 0, 'jz': 1, 'jnc': 2, 'jc': 3, 'jn': 4,
                                'jge': 5, 'jl': 6, 'jmp': 7})
 addop("f2_3", [bs('001'), bs_f2_jcc, offimm])
-

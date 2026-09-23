@@ -8,6 +8,7 @@ from collections import defaultdict
 from miasm.core.bin_stream import bin_stream
 import miasm.arch.ppc.regs as regs_module
 from miasm.arch.ppc.regs import *
+from pyparsing import Literal
 from miasm.core.asm_ast import AstInt, AstId, AstMem, AstOp
 from miasm.ir.ir import color_expr_html
 
@@ -29,8 +30,8 @@ def cb_deref_imm_reg(tokens):
         raise NotImplementedError('len(tokens) > 2')
 
 
-deref_reg_disp = (Optional(base_expr) + LPARENTHESIS + gpregs.parser +  RPARENTHESIS).setParseAction(cb_deref_imm_reg)
-deref_reg = (LPARENTHESIS + gpregs.parser +  RPARENTHESIS).setParseAction(cb_deref_imm_reg)
+deref_reg_disp = (Optional(base_expr) + LPARENTHESIS + gpregs.parser +  RPARENTHESIS).setParseAction(parse_action_tokens(cb_deref_imm_reg))
+deref_reg = (LPARENTHESIS + gpregs.parser +  RPARENTHESIS).setParseAction(parse_action_tokens(cb_deref_imm_reg))
 
 deref = deref_reg | deref_reg_disp
 
@@ -221,7 +222,6 @@ class mn_ppc(cls_mn):
     all_mn = []
     all_mn_mode = defaultdict(list)
     all_mn_name = defaultdict(list)
-    all_mn_inst = defaultdict(list)
     instruction = instruction_ppc
     max_instruction_len = 4
 

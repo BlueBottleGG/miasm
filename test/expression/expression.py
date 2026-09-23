@@ -82,7 +82,7 @@ C = A+B
 D = C + A
 E = A / B
 F = A // B
-assert E is F
+assert E == F
 
 assert A in A
 assert A in C

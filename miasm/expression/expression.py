@@ -468,9 +468,6 @@ class ExprVisitorContains(ExprWalkBase[bool]):
     def contains(self, expr: "Expr", needle: "Expr") -> bool|None:
         return self.visit(expr, needle)
 
-contains_visitor = ExprVisitorContains()
-canonize_visitor = ExprVisitorCanonize()
-
 # IR definitions
 
 @overload
@@ -570,10 +567,6 @@ class Expr(object):
 
     __slots__ = ["_hash", "_repr", "_size"]
 
-    args2expr = {}
-    canon_exprs: set["Expr"] = set()
-    use_singleton = True
-
     _size : int
 
     def set_size(self, _):
@@ -596,23 +589,11 @@ class Expr(object):
 
     @staticmethod
     def get_object(expr_cls, args):
-        if not expr_cls.use_singleton:
-            return object.__new__(expr_cls)
-
-        expr = Expr.args2expr.get((expr_cls, args))
-        if expr is None:
-            expr = object.__new__(expr_cls)
-            Expr.args2expr[(expr_cls, args)] = expr
-        return expr
+        return object.__new__(expr_cls)
 
     @property
     def is_canon(self) -> bool:
-        return self in Expr.canon_exprs
-
-    @is_canon.setter
-    def is_canon(self, value: bool):
-        assert value is True
-        Expr.canon_exprs.add(self)
+        return self.canonize() == self
 
     # Common operations
 
@@ -649,11 +630,6 @@ class Expr(object):
     def __eq__(self, other):
         if self is other:
             return True
-        elif self.use_singleton:
-            # In case of Singleton, pointer comparison is sufficient
-            # Avoid computation of hash and repr
-            return False
-
         if self.__class__ is not other.__class__:
             return False
         if hash(self) != hash(other):
@@ -730,7 +706,7 @@ class Expr(object):
 
     def canonize(self) -> "Expr":
         "Canonize the Expression"
-        return canonize_visitor.visit(self)
+        return ExprVisitorCanonize().visit(self)
 
     def msb(self) -> "Expr":
         "Return the Most Significant Bit"
@@ -822,7 +798,7 @@ class Expr(object):
         raise RuntimeError("Moved api")
 
     def __contains__(self, expr: "Expr") -> bool:
-        ret = contains_visitor.contains(self, expr)
+        ret = ExprVisitorContains().contains(self, expr)
         return bool(ret)
 
     def visit(self, callback: Callable[["Expr"], "Expr"]) -> "Expr":

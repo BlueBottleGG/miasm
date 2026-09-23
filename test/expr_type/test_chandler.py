@@ -10,7 +10,9 @@ from future.utils import viewitems
 from past.builtins import cmp
 from builtins import str
 from miasm.expression.expression import ExprInt, ExprId, ExprMem
-from miasm.expression.simplifications import expr_simp
+from miasm.expression.simplifications import create_expr_simp
+
+expr_simp = create_expr_simp()
 
 from miasm.core.objc import parse_access
 from miasm.core.objc import ast_get_c_access_expr

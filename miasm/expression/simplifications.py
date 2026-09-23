@@ -239,13 +239,22 @@ class ExpressionSimplifier(ExprVisitorCallbackBottomToTop):
     def enable_high_to_explicit(self):
         self.enable_pass(m2_expr.ExprOp, ExpressionSimplifier.PASS_HIGH_TO_EXPLICIT_OP)
 
-# Public ExprSimplificationPass instance with commons passes
-expr_simp = ExpressionSimplifier()
-expr_simp.enable_common()
+def create_expr_simp() -> ExpressionSimplifier:
+    """Create a simplifier with the common passes and its own cache."""
+    simplifier = ExpressionSimplifier()
+    simplifier.enable_common()
+    return simplifier
 
-expr_simp_high_to_explicit = ExpressionSimplifier()
-expr_simp_high_to_explicit.enable_high_to_explicit()
 
-expr_simp_explicit = ExpressionSimplifier()
-expr_simp_explicit.enable_common()
-expr_simp_explicit.enable_high_to_explicit()
+def create_expr_simp_high_to_explicit() -> ExpressionSimplifier:
+    """Create a simplifier for high-level operation lowering."""
+    simplifier = ExpressionSimplifier()
+    simplifier.enable_high_to_explicit()
+    return simplifier
+
+
+def create_expr_simp_explicit() -> ExpressionSimplifier:
+    """Create a simplifier with common and explicit lowering passes."""
+    simplifier = create_expr_simp()
+    simplifier.enable_high_to_explicit()
+    return simplifier

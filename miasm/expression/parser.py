@@ -1,16 +1,17 @@
 import pyparsing
+from miasm.core.cpu import parse_action_tokens
 from miasm.expression.expression import ExprInt, ExprId, ExprLoc, ExprSlice, \
     ExprMem, ExprCond, ExprCompose, ExprOp, ExprAssign, LocKey
 
-integer = pyparsing.Word(pyparsing.nums).setParseAction(lambda t:
-                                                        int(t[0]))
+integer = pyparsing.Word(pyparsing.nums).setParseAction(parse_action_tokens(lambda t:
+                                                        int(t[0])))
 hex_word = pyparsing.Literal('0x') + pyparsing.Word(pyparsing.hexnums)
-hex_int = pyparsing.Combine(hex_word).setParseAction(lambda t:
-                                                     int(t[0], 16))
+hex_int = pyparsing.Combine(hex_word).setParseAction(parse_action_tokens(lambda t:
+                                                     int(t[0], 16)))
 
 str_int_pos = (hex_int | integer)
 str_int_neg = (pyparsing.Suppress('-') + \
-                   (hex_int | integer)).setParseAction(lambda t: -t[0])
+                   (hex_int | integer)).setParseAction(parse_action_tokens(lambda t: -t[0]))
 
 str_int = str_int_pos | str_int_neg
 
@@ -61,15 +62,15 @@ def parse_loc_key(t):
     loc_key, size = LocKey(t[0]), t[1]
     return ExprLoc(loc_key, size)
 
-expr_int.setParseAction(lambda t: ExprInt(*t))
-expr_id.setParseAction(lambda t: ExprId(*t))
-expr_loc.setParseAction(parse_loc_key)
-expr_slice.setParseAction(lambda t: ExprSlice(*t))
-expr_mem.setParseAction(lambda t: ExprMem(*t))
-expr_cond.setParseAction(lambda t: ExprCond(*t))
-expr_compose.setParseAction(lambda t: ExprCompose(*t))
-expr_op.setParseAction(lambda t: ExprOp(*t))
-expr_aff.setParseAction(lambda t: ExprAssign(*t))
+expr_int.setParseAction(parse_action_tokens(lambda t: ExprInt(*t)))
+expr_id.setParseAction(parse_action_tokens(lambda t: ExprId(*t)))
+expr_loc.setParseAction(parse_action_tokens(parse_loc_key))
+expr_slice.setParseAction(parse_action_tokens(lambda t: ExprSlice(*t)))
+expr_mem.setParseAction(parse_action_tokens(lambda t: ExprMem(*t)))
+expr_cond.setParseAction(parse_action_tokens(lambda t: ExprCond(*t)))
+expr_compose.setParseAction(parse_action_tokens(lambda t: ExprCompose(*t)))
+expr_op.setParseAction(parse_action_tokens(lambda t: ExprOp(*t)))
+expr_aff.setParseAction(parse_action_tokens(lambda t: ExprAssign(*t)))
 
 
 def str_to_expr(str_in):

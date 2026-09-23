@@ -339,11 +339,6 @@ class mn_mep(cls_mn):
                                      #   - the data is the corresponding
                                      #     metamn object
 
-    all_mn_inst = defaultdict(list)  # mnemonics objects
-                                     # Note:
-                                     #   - the key is the mnemonic Python class
-                                     #   - the data is an instantiated object
-
     bintree = dict()  # Variable storing internal values used to guess a
                       # mnemonic during disassembly
 
@@ -380,7 +375,7 @@ class mn_mep(cls_mn):
     @classmethod
     def gen_modes(cls, subcls, name, bases, dct, fields):
         """Ease populating internal variables used to disassemble & assemble, such
-        as self.all_mn_mode, self.all_mn_name and self.all_mn_inst
+        as self.all_mn_mode and self.all_mn_name
 
         Notes:
             - it must be implemented !
