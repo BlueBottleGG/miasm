@@ -1184,8 +1184,9 @@ class cls_mn(with_metaclass(metamn, object)):
         return fields
 
     @classmethod
-    def dis(cls, bs_o, mode_o = None, offset=0):
-        expr_simp = create_expr_simp()
+    def dis(cls, bs_o, mode_o = None, offset=0, expr_simp=None):
+        if expr_simp is None:
+            expr_simp = create_expr_simp()
         if not isinstance(bs_o, bin_stream):
             bs_o = bin_stream_str(bs_o)
 

@@ -1204,6 +1204,7 @@ class disasmEngine(object):
         self.attrib = attrib
         self.bin_stream = bin_stream
         self.loc_db = loc_db
+        self.expr_simp = create_expr_simp()
 
         # Setup options
         self.dont_dis = []
@@ -1270,7 +1271,8 @@ class disasmEngine(object):
             off_i = offset
             error = None
             try:
-                instr = self.arch.dis(self.bin_stream, self.attrib, offset)
+                instr = self.arch.dis(self.bin_stream, self.attrib, offset,
+                                      expr_simp=self.expr_simp)
             except Disasm_Exception as e:
                 log_asmblock.warning(e)
                 instr = None
