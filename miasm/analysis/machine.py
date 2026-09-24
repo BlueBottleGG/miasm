@@ -32,44 +32,44 @@ class Machine(object):
         if machine_name == "arml":
             from miasm.arch.arm.disasm import dis_arml as dis_engine
             from miasm.arch.arm import arch
-            try:
-                from miasm.arch.arm import jit
-                jitter = jit.jitter_arml
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.arm import jit
+            #     jitter = jit.jitter_arml
+            # except ImportError:
+            #     pass
             mn = arch.mn_arm
             from miasm.arch.arm.lifter_model_call import LifterModelCallArml as lifter_model_call
             from miasm.arch.arm.sem import Lifter_Arml as lifter
         elif machine_name == "armb":
             from miasm.arch.arm.disasm import dis_armb as dis_engine
             from miasm.arch.arm import arch
-            try:
-                from miasm.arch.arm import jit
-                jitter = jit.jitter_armb
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.arm import jit
+            #     jitter = jit.jitter_armb
+            # except ImportError:
+            #     pass
             mn = arch.mn_arm
             from miasm.arch.arm.lifter_model_call import LifterModelCallArmb as lifter_model_call
             from miasm.arch.arm.sem import Lifter_Armb as lifter
         elif machine_name == "aarch64l":
             from miasm.arch.aarch64.disasm import dis_aarch64l as dis_engine
             from miasm.arch.aarch64 import arch
-            try:
-                from miasm.arch.aarch64 import jit
-                jitter = jit.jitter_aarch64l
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.aarch64 import jit
+            #     jitter = jit.jitter_aarch64l
+            # except ImportError:
+            #     pass
             mn = arch.mn_aarch64
             from miasm.arch.aarch64.lifter_model_call import LifterModelCallAarch64l as lifter_model_call
             from miasm.arch.aarch64.sem import Lifter_Aarch64l as lifter
         elif machine_name == "aarch64b":
             from miasm.arch.aarch64.disasm import dis_aarch64b as dis_engine
             from miasm.arch.aarch64 import arch
-            try:
-                from miasm.arch.aarch64 import jit
-                jitter = jit.jitter_aarch64b
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.aarch64 import jit
+            #     jitter = jit.jitter_aarch64b
+            # except ImportError:
+            #     pass
             mn = arch.mn_aarch64
             from miasm.arch.aarch64.lifter_model_call import LifterModelCallAarch64b as lifter_model_call
             from miasm.arch.aarch64.sem import Lifter_Aarch64b as lifter
@@ -79,11 +79,11 @@ class Machine(object):
             mn = arch.mn_armt
             from miasm.arch.arm.lifter_model_call import LifterModelCallArmtl as lifter_model_call
             from miasm.arch.arm.sem import Lifter_Armtl as lifter
-            try:
-                from miasm.arch.arm import jit
-                jitter = jit.jitter_armtl
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.arm import jit
+            #     jitter = jit.jitter_armtl
+            # except ImportError:
+            #     pass
         elif machine_name == "armtb":
             from miasm.arch.arm.disasm import dis_armtb as dis_engine
             from miasm.arch.arm import arch
@@ -96,107 +96,107 @@ class Machine(object):
         elif machine_name == "x86_16":
             from miasm.arch.x86.disasm import dis_x86_16 as dis_engine
             from miasm.arch.x86 import arch
-            try:
-                from miasm.arch.x86 import jit
-                jitter = jit.jitter_x86_16
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.x86 import jit
+            #     jitter = jit.jitter_x86_16
+            # except ImportError:
+            #     pass
             mn = arch.mn_x86
             from miasm.arch.x86.lifter_model_call import LifterModelCall_x86_16 as lifter_model_call
             from miasm.arch.x86.sem import Lifter_X86_16 as lifter
         elif machine_name == "x86_32":
             from miasm.arch.x86.disasm import dis_x86_32 as dis_engine
             from miasm.arch.x86 import arch
-            try:
-                from miasm.arch.x86 import jit
-                jitter = jit.jitter_x86_32
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.x86 import jit
+            #     jitter = jit.jitter_x86_32
+            # except ImportError:
+            #     pass
             mn = arch.mn_x86
             from miasm.arch.x86.lifter_model_call import LifterModelCall_x86_32 as lifter_model_call
             from miasm.arch.x86.sem import Lifter_X86_32 as lifter
-            try:
-                from miasm.analysis.gdbserver import GdbServer_x86_32 as gdbserver
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.analysis.gdbserver import GdbServer_x86_32 as gdbserver
+            # except ImportError:
+            #     pass
         elif machine_name == "x86_64":
             from miasm.arch.x86.disasm import dis_x86_64 as dis_engine
             from miasm.arch.x86 import arch
-            try:
-                from miasm.arch.x86 import jit
-                jitter = jit.jitter_x86_64
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.x86 import jit
+            #     jitter = jit.jitter_x86_64
+            # except ImportError:
+            #     pass
             mn = arch.mn_x86
             from miasm.arch.x86.lifter_model_call import LifterModelCall_x86_64 as lifter_model_call
             from miasm.arch.x86.sem import Lifter_X86_64 as lifter
         elif machine_name == "msp430":
             from miasm.arch.msp430.disasm import dis_msp430 as dis_engine
             from miasm.arch.msp430 import arch
-            try:
-                from miasm.arch.msp430 import jit
-                jitter = jit.jitter_msp430
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.msp430 import jit
+            #     jitter = jit.jitter_msp430
+            # except ImportError:
+            #     pass
             mn = arch.mn_msp430
             from miasm.arch.msp430.lifter_model_call import LifterModelCallMsp430 as lifter_model_call
             from miasm.arch.msp430.sem import Lifter_MSP430 as lifter
-            try:
-                from miasm.analysis.gdbserver import GdbServer_msp430 as gdbserver
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.analysis.gdbserver import GdbServer_msp430 as gdbserver
+            # except ImportError:
+            #     pass
         elif machine_name == "mips32b":
             from miasm.arch.mips32.disasm import dis_mips32b as dis_engine
             from miasm.arch.mips32 import arch
-            try:
-                from miasm.arch.mips32 import jit
-                jitter = jit.jitter_mips32b
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.mips32 import jit
+            #     jitter = jit.jitter_mips32b
+            # except ImportError:
+            #     pass
             mn = arch.mn_mips32
             from miasm.arch.mips32.lifter_model_call import LifterModelCallMips32b as lifter_model_call
             from miasm.arch.mips32.sem import Lifter_Mips32b as lifter
         elif machine_name == "mips32l":
             from miasm.arch.mips32.disasm import dis_mips32l as dis_engine
             from miasm.arch.mips32 import arch
-            try:
-                from miasm.arch.mips32 import jit
-                jitter = jit.jitter_mips32l
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.mips32 import jit
+            #     jitter = jit.jitter_mips32l
+            # except ImportError:
+            #     pass
             mn = arch.mn_mips32
             from miasm.arch.mips32.lifter_model_call import LifterModelCallMips32l as lifter_model_call
             from miasm.arch.mips32.sem import Lifter_Mips32l as lifter
         elif machine_name == "ppc32b":
             from miasm.arch.ppc.disasm import dis_ppc32b as dis_engine
             from miasm.arch.ppc import arch
-            try:
-                from miasm.arch.ppc import jit
-                jitter = jit.jitter_ppc32b
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.ppc import jit
+            #     jitter = jit.jitter_ppc32b
+            # except ImportError:
+            #     pass
             mn = arch.mn_ppc
             from miasm.arch.ppc.lifter_model_call import LifterModelCallPpc32b as lifter_model_call
             from miasm.arch.ppc.sem import Lifter_PPC32b as lifter
         elif machine_name == "mepb":
             from miasm.arch.mep.disasm import dis_mepb as dis_engine
             from miasm.arch.mep import arch
-            try:
-                from miasm.arch.mep import jit
-                jitter = jit.jitter_mepb
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.mep import jit
+            #     jitter = jit.jitter_mepb
+            # except ImportError:
+            #     pass
             mn = arch.mn_mep
             from miasm.arch.mep.lifter_model_call import LifterModelCallMepb as lifter_model_call
             from miasm.arch.mep.sem import Lifter_MEPb as lifter
         elif machine_name == "mepl":
             from miasm.arch.mep.disasm import dis_mepl as dis_engine
             from miasm.arch.mep import arch
-            try:
-                from miasm.arch.mep import jit
-                jitter = jit.jitter_mepl
-            except ImportError:
-                pass
+            # try:
+            #     from miasm.arch.mep import jit
+            #     jitter = jit.jitter_mepl
+            # except ImportError:
+            #     pass
             mn = arch.mn_mep
             from miasm.arch.mep.lifter_model_call import LifterModelCallMepl as lifter_model_call
             from miasm.arch.mep.sem import Lifter_MEPl as lifter
