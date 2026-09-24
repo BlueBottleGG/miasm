@@ -440,7 +440,6 @@ class DSEEngine(object):
         # Reset intern elements
         self.jitter.vm.set_exception(0)
         self.jitter.cpu.set_exception(0)
-        self.jitter.bs._atomic_mode = False
 
         # Reset symb exec
         for key, _ in list(viewitems(self.symb.symbols)):

@@ -26,12 +26,6 @@ from miasm.core.utils import upck8be, upck16be, upck32be, upck64be
 
 class bin_stream(object):
 
-    # Cache must be initialized by entering atomic mode
-    _cache = None
-    CACHE_SIZE = 10000
-    # By default, no atomic mode
-    _atomic_mode = False
-
     def __init__(self, *args, **kargs):
         self.endianness = LITTLE_ENDIAN
 
@@ -46,18 +40,6 @@ class bin_stream(object):
     def hexdump(self, offset, l):
         return
 
-    def enter_atomic_mode(self):
-        """Enter atomic mode. In this mode, read may be cached"""
-        assert not self._atomic_mode
-        self._atomic_mode = True
-        self._cache = {}
-
-    def leave_atomic_mode(self):
-        """Leave atomic mode"""
-        assert self._atomic_mode
-        self._atomic_mode = False
-        self._cache = None
-
     def _getbytes(self, start, length):
         return self.bin[start:start + length]
 
@@ -66,16 +48,8 @@ class bin_stream(object):
         @start: starting offset (in byte)
         @l: (optional) number of bytes to read
 
-        Wrapper on _getbytes, with atomic mode handling.
         """
-        if self._atomic_mode:
-            val = self._cache.get((start,l), None)
-            if val is None:
-                val = self._getbytes(start, l)
-                self._cache[(start,l)] = val
-        else:
-            val = self._getbytes(start, l)
-        return val
+        return self._getbytes(start, l)
 
     def getbits(self, start, n):
         """Return the bits from the bit stream

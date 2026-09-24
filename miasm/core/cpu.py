@@ -1189,18 +1189,11 @@ class cls_mn(with_metaclass(metamn, object)):
         if not isinstance(bs_o, bin_stream):
             bs_o = bin_stream_str(bs_o)
 
-        bs_o.enter_atomic_mode()
-
         offset_o = offset
-        try:
-            pre_dis_info, bs, mode, offset, prefix_len = cls.pre_dis(
-                bs_o, mode_o, offset)
-        except:
-            bs_o.leave_atomic_mode()
-            raise
+        pre_dis_info, bs, mode, offset, prefix_len = cls.pre_dis(
+            bs_o, mode_o, offset)
         candidates = cls.guess_mnemo(bs, mode, pre_dis_info, offset)
         if not candidates:
-            bs_o.leave_atomic_mode()
             raise Disasm_Exception('cannot disasm (guess) at %X' % offset)
 
         out = []
@@ -1243,11 +1236,7 @@ class cls_mn(with_metaclass(metamn, object)):
                     if bs_l * 8 - offset_b < l:
                         getok = False
                         break
-                    try:
-                        bv = cls.getbits(bs, mode, offset_b, l)
-                    except:
-                        bs_o.leave_atomic_mode()
-                        raise
+                    bv = cls.getbits(bs, mode, offset_b, l)
                     offset_b += l
                     if not f.fname in fname_values:
                         fname_values[f.fname] = bv
@@ -1289,8 +1278,6 @@ class cls_mn(with_metaclass(metamn, object)):
                 alias = True
             out.append(instr)
             out_c.append(c)
-
-        bs_o.leave_atomic_mode()
 
         if not out:
             raise Disasm_Exception('cannot disasm at %X' % offset_o)
