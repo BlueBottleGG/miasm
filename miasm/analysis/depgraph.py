@@ -7,7 +7,7 @@ from future.utils import viewitems
 from miasm.expression.expression import ExprInt, ExprLoc, ExprAssign, \
     ExprWalk, canonize_to_exprloc, is_function_call
 from miasm.core.graph import DiGraph
-from miasm.expression.simplifications import create_expr_simp_explicit
+from miasm.expression.simplifications import get_thread_expr_simp_explicit
 from miasm.ir.symbexec import SymbolicExecutionEngine
 from miasm.ir.ir import IRBlock, AssignBlock
 from miasm.ir.translators import Translator
@@ -538,7 +538,7 @@ class DependencyGraph(object):
         """Simplify expression so avoid tracking useless elements,
         as: XOR EAX, EAX
         """
-        expr_simp_explicit = create_expr_simp_explicit()
+        expr_simp_explicit = get_thread_expr_simp_explicit()
         follow = set()
         for expr in exprs:
             follow.add(expr_simp_explicit(expr))

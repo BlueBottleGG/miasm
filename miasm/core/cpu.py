@@ -16,7 +16,7 @@ from miasm.core.utils import decode_hex
 import miasm.expression.expression as m2_expr
 from miasm.core.bin_stream import bin_stream, bin_stream_str
 from miasm.core.utils import Disasm_Exception
-from miasm.expression.simplifications import create_expr_simp
+from miasm.expression.simplifications import get_thread_expr_simp
 
 
 from miasm.core.asm_ast import AstNode, AstInt, AstId, AstOp
@@ -1041,7 +1041,7 @@ class instruction(object):
         return m2_expr.ExprInt(self.offset+self.l, expr.size)
 
     def resolve_args_with_symbols(self, loc_db):
-        expr_simp = create_expr_simp()
+        expr_simp = get_thread_expr_simp()
         args_out = []
         for expr in self.args:
             # try to resolve symbols using loc_db (0 for default value)
@@ -1193,7 +1193,7 @@ class cls_mn(with_metaclass(metamn, object)):
     @classmethod
     def dis(cls, bs_o, mode_o = None, offset=0, expr_simp=None):
         if expr_simp is None:
-            expr_simp = create_expr_simp()
+            expr_simp = get_thread_expr_simp()
         if not isinstance(bs_o, bin_stream):
             bs_o = bin_stream_str(bs_o)
 
@@ -1313,7 +1313,7 @@ class cls_mn(with_metaclass(metamn, object)):
 
     @classmethod
     def fromstring(cls, text, loc_db, mode = None):
-        expr_simp = create_expr_simp()
+        expr_simp = get_thread_expr_simp()
         name = re.search(r'(\S+)', text).groups()
         if not name:
             raise ValueError('cannot find name', text)

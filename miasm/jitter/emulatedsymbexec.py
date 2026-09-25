@@ -2,6 +2,7 @@ from miasm.core.utils import decode_hex, encode_hex
 import miasm.expression.expression as m2_expr
 from miasm.ir.symbexec import SymbolicExecutionEngine
 from miasm.arch.x86.arch import is_op_segm
+from miasm.expression.simplifications import create_expr_simp_explicit
 
 
 class EmulatedSymbExec(SymbolicExecutionEngine):
@@ -57,6 +58,11 @@ class EmulatedSymbExec(SymbolicExecutionEngine):
         memory accesses.
         @cpu: JitCpu instance
         """
+        # Its extra passes capture this engine, so the simplifier cannot be shared.
+        if len(args) >= 3 and args[2] is None:
+            args = args[:2] + (create_expr_simp_explicit(),) + args[3:]
+        elif len(args) < 3 and kwargs.get("sb_expr_simp") is None:
+            kwargs["sb_expr_simp"] = create_expr_simp_explicit()
         super(EmulatedSymbExec, self).__init__(*args, **kwargs)
         self.cpu = cpu
         self.vm = vm

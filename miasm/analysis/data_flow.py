@@ -13,7 +13,7 @@ from miasm.ir.ir import IRCFG, AssignBlock, IRBlock, IRBlockBase, IRCFGBase, Lif
 from miasm.expression.expression import Expr, ExprLoc, ExprMem, ExprId, ExprInt,\
     ExprAssign, ExprOp, ExprWalk, ExprSlice, LocKey, is_compose, is_cond, \
     is_function_call, ExprVisitorCallbackBottomToTop, is_id, is_int, is_loc, is_mem, is_op, is_slice
-from miasm.expression.simplifications import create_expr_simp, create_expr_simp_explicit
+from miasm.expression.simplifications import get_thread_expr_simp, get_thread_expr_simp_explicit
 from miasm.core.interval import interval
 from miasm.expression.expression_helper import possible_values
 from miasm.analysis.ssa import SSADiGraph, get_phi_sources_parent_block, \
@@ -174,7 +174,7 @@ class DiGraphDefUse(DiGraph[AssignblkNode]):
                                         apply_simp=apply_simp)
 
     def _compute_def_use_block(self, block: IRBlock, reaching_defs: ReachingDefinitions, deref_mem=False, apply_simp=False):
-        simplifier = create_expr_simp_explicit() if apply_simp else None
+        simplifier = get_thread_expr_simp_explicit() if apply_simp else None
         for index, assignblk in enumerate(block):
             assignblk_reaching_defs = reaching_defs.get_definitions(block.loc_key, index)
             for lval, expr in assignblk.items():
@@ -756,7 +756,7 @@ def is_stack_access(lifter: Lifter, expr: Expr) -> Literal[False]|ExprMem:
     if not is_mem(expr):
         return False
     ptr = expr.ptr
-    diff = create_expr_simp()(ptr - lifter.sp)
+    diff = get_thread_expr_simp()(ptr - lifter.sp)
     if not is_int(diff):
         return False
     return expr
@@ -791,7 +791,7 @@ def check_expr_below_stack(lifter: Lifter, expr: ExprMem, include_positive_sp_of
     @lifter: lifter_model_call instance
     @expr: Expression instance
     """
-    expr_simp = create_expr_simp()
+    expr_simp = get_thread_expr_simp()
     ptr = expr.ptr
     diff = expr_simp(ptr - lifter.sp)
     if not is_int(diff):
@@ -808,7 +808,7 @@ def retrieve_stack_accesses(lifter: Lifter, ircfg: IRCFG, include_positive_sp_of
     @lifter: lifter_model_call instance
     @ircfg: IRCFG instance
     """
-    expr_simp = create_expr_simp()
+    expr_simp = get_thread_expr_simp()
     stack_vars = set[ExprMem]()
     for block in ircfg.blocks.values():
         for assignblk in block:
@@ -2023,7 +2023,7 @@ class State(object):
         @assignblock: AssignBlock instance
         """
 
-        expr_simp = create_expr_simp()
+        expr_simp = get_thread_expr_simp()
         out = dict(assignblock.items())
         new_out = dict[Expr, Expr]()
         # Replace sub expression by their equivalence class repesentative

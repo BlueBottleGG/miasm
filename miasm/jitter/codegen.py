@@ -13,7 +13,7 @@ from miasm.ir.ir import IRBlock, AssignBlock
 
 from miasm.ir.translators.C import TranslatorC
 from miasm.core.asmblock import AsmBlockBad
-from miasm.expression.simplifications import create_expr_simp_high_to_explicit
+from miasm.expression.simplifications import get_thread_expr_simp_high_to_explicit
 
 TRANSLATOR_NO_SYMBOL = TranslatorC(loc_db=None)
 
@@ -181,7 +181,7 @@ class CGen(object):
             out = []
             for irblock in irblocks:
                 new_irblock = self.lifter.irbloc_fix_regs_for_mode(irblock, self.lifter.attrib)
-                new_irblock = new_irblock.simplify(create_expr_simp_high_to_explicit())[1]
+                new_irblock = new_irblock.simplify(get_thread_expr_simp_high_to_explicit())[1]
                 out.append(new_irblock)
             irblocks = out
 

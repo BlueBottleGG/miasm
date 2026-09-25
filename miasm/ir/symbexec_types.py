@@ -3,7 +3,7 @@ from __future__ import print_function
 from future.utils import viewitems
 
 from miasm.ir.symbexec import SymbolicExecutionEngine, StateEngine
-from miasm.expression.simplifications import create_expr_simp
+from miasm.expression.simplifications import get_thread_expr_simp
 from miasm.expression.expression import ExprId, ExprMem
 
 
@@ -72,7 +72,7 @@ class SymbExecCType(SymbolicExecutionEngine):
                  chandler,
                  sb_expr_simp=None):
         if sb_expr_simp is None:
-            sb_expr_simp = create_expr_simp()
+            sb_expr_simp = get_thread_expr_simp()
         self.chandler = chandler
 
         super(SymbExecCType, self).__init__(lifter,

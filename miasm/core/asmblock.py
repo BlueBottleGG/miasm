@@ -11,7 +11,7 @@ from future.utils import viewitems, viewvalues
 
 from miasm.expression.expression import ExprId, ExprInt, get_expr_locs
 from miasm.expression.expression import LocKey
-from miasm.expression.simplifications import create_expr_simp
+from miasm.expression.simplifications import get_thread_expr_simp
 from miasm.core.utils import Disasm_Exception, pck
 from miasm.core.graph import DiGraph, DiGraphSimplifier, MatchGraphJoker
 from miasm.core.interval import interval
@@ -772,7 +772,7 @@ def fix_expr_val(expr, symbols):
             e = ExprInt(offset, e.size)
         return e
     result = expr.visit(expr_calc)
-    result = create_expr_simp()(result)
+    result = get_thread_expr_simp()(result)
     if not isinstance(result, ExprInt):
         raise RuntimeError('Cannot resolve symbol %s' % expr)
     return result
@@ -1204,7 +1204,7 @@ class disasmEngine(object):
         self.attrib = attrib
         self.bin_stream = bin_stream
         self.loc_db = loc_db
-        self.expr_simp = create_expr_simp()
+        self.expr_simp = get_thread_expr_simp()
 
         # Setup options
         self.dont_dis = []

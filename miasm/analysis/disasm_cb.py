@@ -5,7 +5,7 @@ from __future__ import print_function
 from future.utils import viewvalues
 
 from miasm.expression.expression import ExprInt, ExprId, ExprMem, match_expr
-from miasm.expression.simplifications import create_expr_simp
+from miasm.expression.simplifications import get_thread_expr_simp
 from miasm.core.asmblock import AsmConstraintNext, AsmConstraintTo
 from miasm.core.locationdb import LocationDB
 from miasm.core.utils import upck32
@@ -88,7 +88,7 @@ def arm_guess_jump_table(dis_engine, cur_block, offsets_to_dis):
         assert(pc_val.size == 32)
         print(pc_val)
         ad = pc_val.arg
-        ad = create_expr_simp()(ad)
+        ad = get_thread_expr_simp()(ad)
         print(ad)
         res = match_expr(ad, jra + jrb, set([jra, jrb]))
         if res is False:

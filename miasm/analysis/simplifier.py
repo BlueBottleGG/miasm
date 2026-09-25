@@ -8,7 +8,7 @@ from functools import wraps
 from miasm.analysis.ssa import SSADiGraph
 from miasm.analysis.outofssa import UnSSADiGraph
 from miasm.analysis.data_flow import DiGraphLivenessSSA
-from miasm.expression.simplifications import create_expr_simp
+from miasm.expression.simplifications import get_thread_expr_simp
 from miasm.ir.ir import AssignBlock, IRBlock
 from miasm.analysis.data_flow import DeadRemoval, \
     merge_blocks, remove_empty_assignblks, \
@@ -88,7 +88,7 @@ class IRCFGSimplifierCommon(IRCFGSimplifier):
     - do_dead_simp_ircfg
     """
     def __init__(self, lifter, expr_simp=None):
-        self.expr_simp = expr_simp if expr_simp is not None else create_expr_simp()
+        self.expr_simp = expr_simp if expr_simp is not None else get_thread_expr_simp()
         super(IRCFGSimplifierCommon, self).__init__(lifter)
         self.deadremoval = DeadRemoval(self.lifter)
 

@@ -22,7 +22,7 @@ from future.utils import viewitems
 
 import logging
 import miasm.expression.expression as m2_expr
-from miasm.expression.simplifications import create_expr_simp
+from miasm.expression.simplifications import get_thread_expr_simp
 from miasm.arch.x86.regs import *
 from miasm.arch.x86.arch import mn_x86, repeat_mn, replace_regs, is_mem_segm
 from miasm.ir.ir import Lifter, IRBlock, AssignBlock
@@ -618,7 +618,7 @@ def get_shift(dst, src):
         shift = src & m2_expr.ExprInt(63, src.size)
     else:
         shift = src & m2_expr.ExprInt(31, src.size)
-    shift = create_expr_simp()(shift)
+    shift = get_thread_expr_simp()(shift)
     return shift
 
 
@@ -934,7 +934,7 @@ def pop_gen(ir, instr, src, size):
         e.append(m2_expr.ExprAssign(sp, new_sp))
     # XXX FIX XXX for pop [esp]
     if isinstance(src, m2_expr.ExprMem):
-        src = create_expr_simp()(src.replace_expr({sp: new_sp}))
+        src = get_thread_expr_simp()(src.replace_expr({sp: new_sp}))
     result = sp
     if ir.do_stk_segm:
         result = ir.gen_segm_expr(SS, result)
@@ -4479,7 +4479,7 @@ def _clmul64_to_128(a64, b64):
         term = m2_expr.ExprCond(bit, a128 << m2_expr.ExprInt(i, 128), m2_expr.ExprInt(0, 128))
         res = m2_expr.ExprOp('^', res, term)
 
-    return create_expr_simp()(res)
+    return get_thread_expr_simp()(res)
 
 def pclmulqdq(_, instr, dst, src, imm8):
     control = int(imm8)
@@ -4489,7 +4489,7 @@ def pclmulqdq(_, instr, dst, src, imm8):
     return [m2_expr.ExprAssign(dst, res)], []
 
 def ps_rl_ll(ir, instr, dst, src, op, size):
-    expr_simp = create_expr_simp()
+    expr_simp = get_thread_expr_simp()
     mask = {16: 0xF,
             32: 0x1F,
             64: 0x3F}[size]

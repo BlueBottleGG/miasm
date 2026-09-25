@@ -3,6 +3,7 @@
 #                                                                              #
 
 import logging
+from threading import local
 from typing import Callable, Type, cast
 
 from future.utils import viewitems
@@ -258,3 +259,25 @@ def create_expr_simp_explicit() -> ExpressionSimplifier:
     simplifier = create_expr_simp()
     simplifier.enable_high_to_explicit()
     return simplifier
+
+
+_thread_simplifiers = local()
+
+
+def _get_thread_simplifier(name: str, factory: Callable[[], ExpressionSimplifier]) -> ExpressionSimplifier:
+    instances = _thread_simplifiers.__dict__
+    if name not in instances:
+        instances[name] = factory()
+    return instances[name]
+
+
+def get_thread_expr_simp() -> ExpressionSimplifier:
+    return _get_thread_simplifier("common", create_expr_simp)
+
+
+def get_thread_expr_simp_high_to_explicit() -> ExpressionSimplifier:
+    return _get_thread_simplifier("high_to_explicit", create_expr_simp_high_to_explicit)
+
+
+def get_thread_expr_simp_explicit() -> ExpressionSimplifier:
+    return _get_thread_simplifier("explicit", create_expr_simp_explicit)

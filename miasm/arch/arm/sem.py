@@ -2,7 +2,7 @@ from builtins import range
 from future.utils import viewitems, viewvalues
 
 from miasm.expression.expression import *
-from miasm.expression.simplifications import create_expr_simp
+from miasm.expression.simplifications import get_thread_expr_simp
 from miasm.ir.ir import Lifter, IRBlock, AssignBlock
 from miasm.arch.arm.arch import mn_arm, mn_armt
 from miasm.arch.arm.regs import *
@@ -803,7 +803,7 @@ def _shift_rotate_tpl(ir, instr, dst, shift_operation, setflags=False, is_not=Fa
     if setflags:
         e += update_flag_zn(res)
     if setflags or onlyCarry:
-        e_do += [ExprAssign(cf, create_expr_simp()(new_cf))]
+        e_do += [ExprAssign(cf, get_thread_expr_simp()(new_cf))]
     # Don't generate conditional shifter on constant
     if shifter.is_int():
         if shifter.is_int(0):
