@@ -4,6 +4,7 @@ from builtins import range
 import re
 import struct
 import logging
+from threading import local
 from collections import defaultdict
 
 
@@ -908,7 +909,12 @@ def getfieldindexby_name(fields, fname):
 class metamn(type):
 
     def __new__(mcs, name, bases, dct):
-        if name == "cls_mn" or name.startswith('mn_'):
+        if name == "cls_mn":
+            return type.__new__(mcs, name, bases, dct)
+        if name.startswith('mn_'):
+            cache = local()
+            cache.instances = {}
+            dct['_decode_cache'] = cache
             return type.__new__(mcs, name, bases, dct)
 
         # Serialized mnemonic classes already carry their registry number.
@@ -969,6 +975,7 @@ class metamn(type):
             bases[0].all_mn_name[c.name].append(c)
             i = c()
             i.init_class()
+            bases[0]._decode_cache.instances[c] = i
             add_candidate(bases, c)
             # gen byte lookup
             o = ""
@@ -1198,19 +1205,27 @@ class cls_mn(with_metaclass(metamn, object)):
             raise Disasm_Exception('cannot disasm (guess) at %X' % offset)
 
         out = []
-        out_c = []
+        out_aliases = []
         if hasattr(bs, 'getlen'):
             bs_l = bs.getlen()
         else:
             bs_l = len(bs)
 
-        alias = False
-        for c in candidates:
-            log.debug("*" * 40, mode, c.mode)
-            log.debug(c.fields)
+        try:
+            decode_cache = cls._decode_cache.instances
+        except AttributeError:
+            decode_cache = cls._decode_cache.instances = {}
 
-            c = c()
-            c.init_class()
+        alias = False
+        for candidate_class in candidates:
+            log.debug("*" * 40, mode, candidate_class.mode)
+            log.debug(candidate_class.fields)
+
+            c = decode_cache.get(candidate_class)
+            if c is None:
+                c = candidate_class()
+                c.init_class()
+                decode_cache[candidate_class] = c
             c.reset_class()
             c.mode = mode
 
@@ -1250,6 +1265,7 @@ class cls_mn(with_metaclass(metamn, object)):
                 continue
 
             c.l = prefix_len + total_l // 8
+            ret = True
             for i in c.to_decode:
                 f = c.fields_order[i]
                 if f.is_present:
@@ -1278,7 +1294,7 @@ class cls_mn(with_metaclass(metamn, object)):
             if c.alias:
                 alias = True
             out.append(instr)
-            out_c.append(c)
+            out_aliases.append(c.alias)
 
         if not out:
             raise Disasm_Exception('cannot disasm at %X' % offset_o)
@@ -1286,8 +1302,8 @@ class cls_mn(with_metaclass(metamn, object)):
             if not alias:
                 log.warning('dis multiple args ret default')
 
-            for i, o in enumerate(out_c):
-                if o.alias:
+            for i, is_alias in enumerate(out_aliases):
+                if is_alias:
                     return out[i]
             raise NotImplementedError(
                 'Multiple disas: \n' +
